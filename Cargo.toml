@@ -1,0 +1,18 @@
+[package]
+name = "polywag"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+num-traits = "0.2.19"
+pastey = "0.1.1"
+wide = "0.8.1"
+bumpalo = {version = "3.14.0", features= ["boxed", "collections"]}
+
+[dev-dependencies]
+criterion = {version = "0.7.0", features = ["html_reports"]}
+
+
+[[bench]]
+name = "bench_fit"
+harness = false
