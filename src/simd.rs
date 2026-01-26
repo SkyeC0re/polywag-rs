@@ -1,12 +1,98 @@
+use cfg_if::cfg_if;
 use core::{
     num::NonZeroUsize,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     slice,
 };
 use std::fmt::Debug;
-use wide::{f32x8, f64x8};
 
 use pastey::paste;
+
+macro_rules! wide_float_simd_field_impl {
+   ( $($name:ty : $elm:ty : $lanes:expr),* ) => {
+        $(paste! {
+        impl SimdField for $name {
+            const ZERO: Self = Self::ZERO;
+            const ONE: Self = Self::ONE;
+            const LANES: NonZeroUsize = NonZeroUsize::new($lanes).unwrap();
+            type Element = $elm;
+
+            #[inline(always)]
+            fn mul_add(self, m: Self, a: Self) -> Self {
+               self.mul_add(m, a)
+            }
+
+            #[inline(always)]
+            fn splat(v: Self::Element) -> Self {
+                Self::splat(v)
+            }
+
+            #[inline(always)]
+            fn as_slice(&self) -> &[$elm] {
+                self.as_array()
+            }
+
+            #[inline(always)]
+            fn as_mut_slice(&mut self) -> &mut [$elm] {
+                self.as_mut_array()
+            }
+
+            #[inline(always)]
+            fn reduce_add(self) -> Self::Element {
+               self.reduce_add()
+            }
+
+            #[inline(always)]
+            fn abs(self) -> Self {
+                self.abs()
+            }
+
+            #[inline(always)]
+            fn max(self, other: Self) -> Self {
+                self.max(other)
+            }
+
+        }
+        })*
+    };
+}
+
+cfg_if! {
+    if  #[cfg(target_feature="avx")] {
+        pub type MaxSimdf32 = wide::f32x8;
+        wide_float_simd_field_impl![
+            MaxSimdf32 : f32 : 8
+        ];
+    } else if #[cfg(any(target_feature="sse", target_feature="simd128", all(target_feature="neon",target_arch="aarch64")))] {
+        pub type MaxSimdf32 = wide::f32x4;
+        wide_float_simd_field_impl![
+            MaxSimdf32 : f32 : 4
+        ];
+    } else {
+        pub type MaxSimdf32 = f32;
+    }
+}
+
+cfg_if! {
+    if  #[cfg(target_feature="avx512f")] {
+        pub type MaxSimdf64 = wide::f64x8;
+        wide_float_simd_field_impl![
+            MaxSimdf64 : f64 : 8
+        ];
+    } else if  #[cfg(target_feature="avx")] {
+        pub type MaxSimdf64 = wide::f64x4;
+        wide_float_simd_field_impl![
+            MaxSimdf64 : f64 : 4
+        ];
+    } else if #[cfg(any(target_feature="sse", target_feature="simd128", all(target_feature="neon",target_arch="aarch64")))] {
+        pub type MaxSimdf64 = wide::f64x2;
+        wide_float_simd_field_impl![
+            MaxSimdf64 : f64 : 2
+        ];
+    } else {
+        pub type MaxSimdf64 = f64;
+    }
+}
 
 pub trait SimdField:
     Copy
@@ -40,90 +126,6 @@ pub trait SimdField:
     fn abs(self) -> Self;
 
     fn max(self, other: Self) -> Self;
-}
-
-macro_rules! forward_basic_ops_impl {
-    ($t:ty) => {
-        impl Add for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn add(self, other: Self) -> Self {
-                Self(self.0 + other.0)
-            }
-        }
-
-        impl AddAssign for $t {
-            #[inline(always)]
-            fn add_assign(&mut self, other: Self) {
-                self.0 += other.0
-            }
-        }
-
-        impl Sub for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn sub(self, other: Self) -> Self {
-                Self(self.0 - other.0)
-            }
-        }
-
-        impl SubAssign for $t {
-            #[inline(always)]
-            fn sub_assign(&mut self, other: Self) {
-                self.0 -= other.0
-            }
-        }
-
-        impl Mul for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn mul(self, other: Self) -> Self {
-                Self(self.0 * other.0)
-            }
-        }
-
-        impl MulAssign for $t {
-            #[inline(always)]
-            fn mul_assign(&mut self, other: Self) {
-                self.0 *= other.0
-            }
-        }
-
-        impl Div for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn div(self, other: Self) -> Self {
-                Self(self.0 / other.0)
-            }
-        }
-
-        impl DivAssign for $t {
-            #[inline(always)]
-            fn div_assign(&mut self, other: Self) {
-                self.0 /= other.0
-            }
-        }
-
-        impl Neg for $t {
-            type Output = Self;
-
-            #[inline(always)]
-            fn neg(self) -> Self {
-                Self(-self.0)
-            }
-        }
-
-        impl PartialEq for $t {
-            #[inline(always)]
-            fn eq(&self, other: &Self) -> bool {
-                self.0 == other.0
-            }
-        }
-    };
 }
 
 macro_rules! primitive_float_simd_field_impl {
@@ -177,69 +179,6 @@ macro_rules! primitive_float_simd_field_impl {
 
 primitive_float_simd_field_impl![f64, f32];
 
-macro_rules! wide_float_numeric_impl {
-   ( $($name:ident : $elm:ty : $simdt:ty : $lanes:expr),* ) => {
-        $(paste! {
-
-        #[repr(transparent)]
-        #[derive(Clone, Copy)]
-        pub struct [<$name>]($simdt);
-
-        forward_basic_ops_impl!($name);
-
-        impl SimdField for $name {
-            const ZERO: Self = Self(<$simdt>::ZERO);
-            const ONE: Self = Self(<$simdt>::ONE);
-            const LANES: NonZeroUsize = NonZeroUsize::new($lanes).unwrap();
-            type Element = $elm;
-
-            #[inline(always)]
-            fn mul_add(self, m: Self, a: Self) -> Self {
-                Self(self.0.mul_add(m.0, a.0))
-            }
-
-            #[inline(always)]
-            fn splat(v: Self::Element) -> Self {
-                Self($simdt::splat(v))
-            }
-
-            #[inline(always)]
-            fn as_slice(&self) -> &[$elm] {
-                self.0.as_array()
-            }
-
-            #[inline(always)]
-            fn as_mut_slice(&mut self) -> &mut [$elm] {
-                self.0.as_mut_array()
-            }
-
-            #[inline(always)]
-            fn reduce_add(self) -> Self::Element {
-               self.0.reduce_add()
-            }
-
-
-            #[inline(always)]
-            fn abs(self) -> Self {
-                Self(self.0.abs())
-            }
-
-            #[inline(always)]
-            fn max(self, other: Self) -> Self {
-                Self(self.0.max(other.0))
-            }
-
-        }
-        })*
-    };
-}
-
-wide_float_numeric_impl![
-    Simdf64 : f64 : f64x8 : 8,
-    // TODO: Update to `f32x16` once LANES and reduce add is implemented.
-    Simdf32: f32 : f32x8 : 8
-];
-
 pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
@@ -269,6 +208,6 @@ macro_rules! wide_simd_able_impl {
 }
 
 wide_simd_able_impl![
-    f32 : Simdf32,
-    f64 : Simdf64
+    f32 : MaxSimdf32,
+    f64 : MaxSimdf64
 ];
