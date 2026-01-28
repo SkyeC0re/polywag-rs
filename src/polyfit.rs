@@ -145,10 +145,6 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
         cfg: PolyfitCfg<T>,
         iter: I,
     ) {
-        for coeffs in &mut self.coeffs {
-            coeffs.clear();
-        }
-
         let mut data_list = GroupedNodeList::new();
         let mut curr_data = GroupedNodeData {
             wv: T::SimdT::ZERO,
@@ -200,6 +196,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
         let weight_sum = weight_sum.reduce_add();
         if !(weight_sum.is_finite() && weight_sum > cfg.halt_epsilon) {
+            self.coeffs.clear();
             return;
         }
 
@@ -232,8 +229,13 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
         let max_coeffs = data_len.min(cfg.max_deg as usize + 1);
         if max_coeffs == 0 {
+            self.coeffs.clear();
             return;
         }
+
+        // Each iteration the highest element of each dimension is overwritten, not modified. As such
+        // we need not worry about stale non-zero values still being present.
+        self.coeffs.set_len(max_coeffs);
 
         let mut p_k = BVec::with_capacity_in(max_coeffs, ws);
         p_k.push(T::ONE);
@@ -242,17 +244,17 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
         for r_i in 0..R {
             unsafe {
                 let d_0 = *d_0s.get_unchecked(r_i) / gamma_0;
-                self.coeffs.get_unchecked_mut(r_i).push(d_0);
+                *self.coeffs.dim_unchecked_mut(r_i).get_unchecked_mut(0) = d_0;
             }
         }
 
         let mut gamma_km1 = gamma_0;
         let mut minus_b_km1 = -b_0 / gamma_0;
         let mut minus_c_km1 = T::ZERO;
-        let mut minus_d_km1s = d_0s.map(|d_0| T::SimdT::splat(-d_0));
+        let mut d_ks = d_0s;
 
         for k in 1..max_coeffs {
-            let (d_ks, gamma_k, b_k) = {
+            let (gamma_k, b_k) = {
                 let mut d_kvs = [T::SimdT::ZERO; R];
                 let mut gamma_kv = T::SimdT::ZERO;
                 let mut b_kv = T::SimdT::ZERO;
@@ -274,7 +276,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
                             // this adds an additional computational step it, on average, decreases the magnitude
                             // of the y values, which appears to lead to less error on higher order fits.
                             *yv = T::SimdT::mul_add(
-                                *minus_d_km1s.get_unchecked(r_i),
+                                T::SimdT::splat(-*d_ks.get_unchecked(r_i)),
                                 chunk.p_km1v,
                                 *yv,
                             );
@@ -286,14 +288,12 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
                     b_kv = wpp.mul_add(chunk.xv, b_kv);
                 }
 
-                (
-                    d_kvs.map(T::SimdT::reduce_add),
-                    gamma_kv.reduce_add(),
-                    b_kv.reduce_add(),
-                )
+                d_ks = d_kvs.map(T::SimdT::reduce_add);
+                (gamma_kv.reduce_add(), b_kv.reduce_add())
             };
 
             if !(gamma_k.is_finite() && gamma_k.abs() > cfg.halt_epsilon) {
+                self.coeffs.set_len(k);
                 break;
             }
 
@@ -315,12 +315,12 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
             for r_i in 0..R {
                 unsafe {
-                    let d_k = *d_ks.get_unchecked(r_i) / gamma_k;
+                    let d_k = d_ks.get_unchecked_mut(r_i);
 
-                    *minus_d_km1s.get_unchecked_mut(r_i) = T::SimdT::splat(-d_k);
+                    *d_k /= gamma_k;
 
-                    let coeffs = self.coeffs.get_unchecked_mut(r_i);
-                    coeffs.push(d_k);
+                    let coeffs = self.coeffs.dim_unchecked_mut(r_i);
+                    *coeffs.get_unchecked_mut(k) = *d_k;
                     for i in (0..k).rev() {
                         let coeff = coeffs.get_unchecked_mut(i);
                         let p_ki = *p_k.get_unchecked(i);
