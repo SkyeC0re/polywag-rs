@@ -3,14 +3,6 @@ use std::hint::black_box;
 
 use polywag::{PolyfitCfg, RawPolynomial};
 
-fn fibonacci(n: u64) -> u64 {
-    match n {
-        0 => 1,
-        1 => 1,
-        n => fibonacci(n - 1) + fibonacci(n - 2),
-    }
-}
-
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("fit 1000 f32", |b| {
         let mut poly = RawPolynomial::new();

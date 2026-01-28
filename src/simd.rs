@@ -1,10 +1,10 @@
 use cfg_if::cfg_if;
 use core::{
+    fmt::Debug,
     num::NonZeroUsize,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     slice,
 };
-use std::fmt::Debug;
 
 use pastey::paste;
 

@@ -1,4 +1,4 @@
-// #![no_std]
+#![no_std]
 
 extern crate alloc;
 
@@ -6,15 +6,13 @@ use crate::{
     simd::{SimdAble, SimdField},
     storage::Coeffs,
 };
-use alloc::vec::Vec;
 pub use bumpalo::{Bump, boxed::Box as BBox, collections::Vec as BVec};
 use core::{
     marker::PhantomData,
-    mem,
+    mem::{self, MaybeUninit},
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
 };
-use std::mem::MaybeUninit;
 
 mod polyfit;
 mod storage;
@@ -25,7 +23,7 @@ pub mod simd;
 /// A polynomial container with `R` range dimensions and functionality specified over externally provided workspaces.
 #[repr(transparent)]
 pub struct RawPolynomial<const R: usize, T: SimdAble> {
-    pub coeffs: Coeffs<R, T>,
+    coeffs: Coeffs<R, T>,
 }
 
 impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
@@ -83,6 +81,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
         })
     }
 
+    /// Computes the derivative of the polynomial in place.
     #[inline]
     pub fn deriv_in_place(&mut self) {
         if self.coeffs.len() == 0 {
@@ -100,6 +99,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
         self.coeffs.set_len(self.coeffs.len() - 1);
     }
 
+    /// Computes the anti-derivative of the polynomial in place with `C = 0`.
     #[inline]
     pub fn anti_deriv_in_place(&mut self) {
         if self.coeffs.len() == 0 {
@@ -136,6 +136,22 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
                 }
             }
         }
+    }
+}
+
+impl<const R: usize, T: SimdAble> Deref for RawPolynomial<R, T> {
+    type Target = Coeffs<R, T>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.coeffs
+    }
+}
+
+impl<const R: usize, T: SimdAble> DerefMut for RawPolynomial<R, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.coeffs
     }
 }
 
@@ -176,34 +192,19 @@ impl<const R: usize, T: SimdAble> Polynomial<R, T> {
     }
 }
 
-pub struct EvalY<'a, const R: usize, T: SimdAble> {
-    ys: [BBox<'a, [T]>; R],
-}
-
-pub struct YIter<'a, const R: usize, T: SimdAble> {
-    eval: &'a EvalY<'a, R, T>,
-    i: usize,
-    len: usize,
-}
-
-impl<'a, const R: usize, T: SimdAble> Iterator for YIter<'a, R, T> {
-    type Item = [T; R];
+impl<const R: usize, T: SimdAble> Deref for Polynomial<R, T> {
+    type Target = Coeffs<R, T>;
 
     #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.i >= self.len {
-            return None;
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.inner.coeffs
+    }
+}
 
-        let i = self.i;
-        self.i += 1;
-
-        Some(
-            self.eval
-                .ys
-                .each_ref()
-                .map(|ys| *unsafe { ys.get_unchecked(i) }),
-        )
+impl<const R: usize, T: SimdAble> DerefMut for Polynomial<R, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner.coeffs
     }
 }
 
@@ -242,60 +243,6 @@ impl<'a, T> Drop for Reset<'a, T> {
 
 impl<const R: usize, T: SimdAble> Polynomial<R, T> {}
 
-// impl<const R: usize, T> PartialEq<RawPolynomial<R, T>> for RawPolynomial<R, T>
-// where
-//     T: SimdAble,
-// {
-//     fn eq(&self, other: &RawPolynomial<R, T>) -> bool {
-//         for (mut short, mut long) in self.coeffs.iter().zip(other.coeffs.iter()) {
-//             if short.len() > long.len() {
-//                 mem::swap(&mut short, &mut long);
-//             }
-
-//             let mut z = T::SimdT::ZERO;
-//             for chunk in long[short.len()..].chunks(T::SimdT::LANES.get()) {
-//                 unsafe {
-//                     ptr::copy_nonoverlapping(
-//                         chunk.as_ptr(),
-//                         z.as_mut_slice().as_mut_ptr(),
-//                         chunk.len(),
-//                     );
-//                 }
-//                 if z != T::SimdT::ZERO {
-//                     return false;
-//                 }
-//             }
-
-//             let mut start = 0;
-//             let mut c1 = T::SimdT::ONE;
-//             let mut c2 = T::SimdT::ONE;
-//             while start < short.len() {
-//                 let chunk_size = usize::min(T::SimdT::LANES.get(), short.len() - start);
-//                 unsafe {
-//                     ptr::copy_nonoverlapping(
-//                         short.get_unchecked(start..).as_ptr(),
-//                         c1.as_mut_slice().as_mut_ptr(),
-//                         chunk_size,
-//                     );
-//                     ptr::copy_nonoverlapping(
-//                         long.get_unchecked(start..).as_ptr(),
-//                         c2.as_mut_slice().as_mut_ptr(),
-//                         chunk_size,
-//                     );
-//                 }
-
-//                 if c1 != c2 {
-//                     return false;
-//                 }
-
-//                 start += chunk_size;
-//             }
-//         }
-
-//         true
-//     }
-// }
-
 #[inline]
 fn eval_slice_horner<SF: SimdField>(slice: &[SF::Element], x: SF) -> SF {
     let mut result = SF::ZERO;
@@ -304,47 +251,4 @@ fn eval_slice_horner<SF: SimdField>(slice: &[SF::Element], x: SF) -> SF {
     }
 
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_noisy() {
-        let mut ws = Bump::new();
-
-        let mut poly = RawPolynomial::<2, f32>::new();
-
-        let fit_vals = Vec::from_iter((-50..50).map(|x| {
-            println!("x {x}");
-
-            let x = (x as f32) * 0.1 + 1.0;
-            (1.0, x, [x, 77.5 * x * x - 1.0])
-        }));
-
-        poly.polyfit_from_iter(
-            &ws,
-            PolyfitCfg::<f32>::new()
-                .with_max_deg(6)
-                .with_halt_epsilon(1e-3),
-            fit_vals.iter().copied(),
-        );
-
-        let vals = poly.evaluate_slice(
-            &ws,
-            &fit_vals.iter().map(|(_, x, _)| *x).collect::<Vec<f32>>(),
-        );
-
-        let sum = vals[1]
-            .iter()
-            .zip(fit_vals.iter().copied())
-            .map(|(&y_computed, (w, x, [_, y]))| w * (y_computed - y).powi(2))
-            .sum::<f32>();
-
-        println!("New Sum: {sum:?}");
-
-        println!("{:.10?}", poly.coeffs.dim(0));
-        println!("{:.10?}", poly.coeffs.dim(1));
-    }
 }

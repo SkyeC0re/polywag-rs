@@ -1,8 +1,14 @@
-use crate::simd::SimdAble;
+extern crate alloc;
+
+use alloc::vec::Vec;
 use core::array;
 use core::mem::MaybeUninit;
+use core::ops::Index;
+use core::ops::IndexMut;
 use core::ptr;
 use core::slice;
+
+use crate::simd::SimdAble;
 
 #[derive(Clone)]
 pub struct Coeffs<const R: usize, T: SimdAble> {
@@ -21,6 +27,7 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
         }
     };
 
+    /// Create the zero polynomial.
     #[inline(always)]
     pub const fn new() -> Self {
         Self {
@@ -29,6 +36,7 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
         }
     }
 
+    /// The number of coefficients (polynomial degree minus one) of the polynomial in all `R` dimensions.
     #[inline(always)]
     pub const fn len(&self) -> usize {
         self.len
@@ -44,6 +52,9 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
             .reserve((cap * R).saturating_sub(self.slab.capacity()));
     }
 
+    /// Sets the number of coefficients of the polynomial in all `R` dimensions. If the new length is smaller
+    /// than the current length then **higher order coefficients are truncated**. If the new length is larger than the
+    /// current length then the added higher order coefficients are set to zero.
     pub fn set_len(&mut self, len: usize) {
         if self.len == len {
             return;
@@ -88,26 +99,35 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
         self.len = len;
     }
 
+    /// Clears the current set of coefficients, effectively creating the zero polynomial.
     #[inline(always)]
     pub fn clear(&mut self) {
         // Safety: We need not call `Drop` on anything, as `T` is `SimdAble` which must be `Copy`.
         self.len = 0;
     }
 
+    /// Returns a reference to the coefficients associated with the selected dimension.
+    ///
+    /// # Safety
+    ///
+    /// This function does no bounds checking on the selected dimension index and selecting an out of bounds index
+    /// is considered undefined behaviour.
     #[inline(always)]
     pub unsafe fn dim_unchecked(&self, r_i: usize) -> &[T] {
         unsafe { slice::from_raw_parts(self.slab.as_ptr().offset((r_i * self.len) as _), self.len) }
     }
 
+    /// Returns a reference to the coefficients associated with the selected dimension. Returns `None` if the index is out of bounds.
     #[inline(always)]
-    pub fn dim(&self, r_i: usize) -> &[T] {
+    pub fn dim(&self, r_i: usize) -> Option<&[T]> {
         if r_i >= R {
-            panic!("Dimension index out of bounds");
+            return None;
         }
 
-        unsafe { self.dim_unchecked(r_i) }
+        Some(unsafe { self.dim_unchecked(r_i) })
     }
 
+    /// Returns a reference to all coefficients for all dimensions.
     #[inline(always)]
     pub fn dims(&self) -> [&[T]; R] {
         array::from_fn(
@@ -116,6 +136,12 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
         )
     }
 
+    /// Returns a mutable reference to the coefficients associated with the selected dimension.
+    ///
+    /// # Safety
+    ///
+    /// This function does no bounds checking on the selected dimension index and selecting an out of bounds index
+    /// is considered undefined behaviour.
     #[inline(always)]
     pub unsafe fn dim_unchecked_mut(&mut self, r_i: usize) -> &mut [T] {
         unsafe {
@@ -126,15 +152,17 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
         }
     }
 
+    /// Returns a mutable reference tto the coefficients associated with the selected dimension. Returns `None` if the index is out of bounds.
     #[inline(always)]
-    pub fn dim_mut(&mut self, r_i: usize) -> &mut [T] {
+    pub fn dim_mut(&mut self, r_i: usize) -> Option<&mut [T]> {
         if r_i >= R {
-            panic!("Dimension index out of bounds");
+            return None;
         }
 
-        unsafe { self.dim_unchecked_mut(r_i) }
+        Some(unsafe { self.dim_unchecked_mut(r_i) })
     }
 
+    /// Returns a mutable reference to all coefficients for all dimensions.
     #[inline(always)]
     pub fn dims_mut(&mut self) -> [&mut [T]; R] {
         array::from_fn(
@@ -149,8 +177,24 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
     }
 }
 
+impl<const R: usize, T: SimdAble> Index<usize> for Coeffs<R, T> {
+    type Output = [T];
+
+    #[inline(always)]
+    fn index(&self, r_i: usize) -> &[T] {
+        self.dim(r_i).expect("Index out of bounds")
+    }
+}
+
+impl<const R: usize, T: SimdAble> IndexMut<usize> for Coeffs<R, T> {
+    #[inline(always)]
+    fn index_mut(&mut self, r_i: usize) -> &mut [T] {
+        self.dim_mut(r_i).expect("Index out of bounds")
+    }
+}
+
 #[cfg(test)]
-mod test {
+mod tests {
     use super::Coeffs;
 
     #[test]
@@ -161,7 +205,7 @@ mod test {
         coeffs.set_len(5);
 
         for r_i in 0..R_DIMS {
-            let slice = coeffs.dim_mut(r_i);
+            let slice = &mut coeffs[r_i];
             assert_eq!(slice.len(), 5);
             assert!(slice.iter().copied().all(|c| c == 0.0));
 
@@ -169,20 +213,20 @@ mod test {
                 *c = ((r_i + 1) * c_i) as _;
             }
 
-            let slice = coeffs.dim(r_i);
+            let slice = &coeffs[r_i];
             assert!(slice.len() == 5);
             assert!(
                 slice
                     .iter()
                     .copied()
                     .enumerate()
-                    .all(|(c_i, c)| c == ((r_i + 1) * c_i) as _)
+                    .all(|(c_i, c)| c == ((r_i + 1) * c_i) as f32)
             );
         }
 
         coeffs.set_len(6);
         for r_i in 0..R_DIMS {
-            let slice = coeffs.dim(r_i);
+            let slice = &coeffs[r_i];
             assert_eq!(slice.len(), 6);
             assert!(
                 slice
@@ -190,7 +234,7 @@ mod test {
                     .copied()
                     .enumerate()
                     .all(|(c_i, c)| if c_i < 5 {
-                        c == ((r_i + 1) * c_i) as _
+                        c == ((r_i + 1) * c_i) as f32
                     } else {
                         c == 0.0
                     })
@@ -199,20 +243,20 @@ mod test {
 
         coeffs.set_len(4);
         for r_i in 0..R_DIMS {
-            let slice = coeffs.dim(r_i);
+            let slice = &coeffs[r_i];
             assert_eq!(slice.len(), 4);
             assert!(
                 slice
                     .iter()
                     .copied()
                     .enumerate()
-                    .all(|(c_i, c)| c == ((r_i + 1) * c_i) as _)
+                    .all(|(c_i, c)| c == ((r_i + 1) * c_i) as f32)
             );
         }
 
         coeffs.set_len(0);
         for r_i in 0..R_DIMS {
-            let slice = coeffs.dim(r_i);
+            let slice = &coeffs[r_i];
             assert_eq!(slice.len(), 0);
         }
     }
