@@ -1,8 +1,8 @@
 use core::{
-    f32,
     marker::PhantomData,
     mem,
     ptr::{NonNull, drop_in_place},
+    u8,
 };
 
 use crate::simd::{SimdAble, SimdField};
@@ -16,6 +16,15 @@ pub struct PolyfitCfg<T: SimdAble> {
 }
 
 impl<T: SimdAble> PolyfitCfg<T> {
+    /// Create a new default configuration with the specified maximum regression polynomial degree.
+    #[inline(always)]
+    pub const fn new_with_max_deg(max_deg: u8) -> Self {
+        Self {
+            max_deg,
+            halt_epsilon: <T as SimdField>::EPS,
+        }
+    }
+
     /// Set the maximum degree that the regressional polynomial
     /// is allowed to have in any dimension.
     #[inline(always)]
@@ -45,24 +54,6 @@ impl<T: SimdAble> PolyfitCfg<T> {
     #[inline(always)]
     pub const fn halt_epsilon(&self) -> T {
         self.halt_epsilon
-    }
-}
-
-impl PolyfitCfg<f32> {
-    pub const fn new() -> Self {
-        Self {
-            max_deg: u8::MAX,
-            halt_epsilon: f32::EPSILON,
-        }
-    }
-}
-
-impl PolyfitCfg<f64> {
-    pub const fn new() -> Self {
-        Self {
-            max_deg: u8::MAX,
-            halt_epsilon: f64::EPSILON,
-        }
     }
 }
 

@@ -10,7 +10,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let xs = (0..1000).map(|i| (i as f32) * 0.01).collect::<Vec<_>>();
         let ys = Vec::from_iter(xs.iter().copied().map(|x| x * x + x + 1.0));
 
-        let cfg = PolyfitCfg::<f32>::new().with_max_deg(2);
+        let cfg = PolyfitCfg::<f32>::new_with_max_deg(2);
 
         let mut ws = polywag::Bump::new();
         poly.polyfit_from_iter(

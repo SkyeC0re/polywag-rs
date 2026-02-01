@@ -14,6 +14,7 @@ macro_rules! wide_float_simd_field_impl {
         impl SimdField for $name {
             const ZERO: Self = Self::ZERO;
             const ONE: Self = Self::ONE;
+            const EPS: Self =  Self::splat(Self::Element::EPSILON);
             const LANES: NonZeroUsize = NonZeroUsize::new($lanes).unwrap();
             type Element = $elm;
 
@@ -52,6 +53,15 @@ macro_rules! wide_float_simd_field_impl {
                 self.max(other)
             }
 
+            #[inline(always)]
+            fn exp(self) -> Self {
+                self.exp()
+            }
+
+            #[inline(always)]
+            fn ln(self) -> Self {
+                self.ln()
+            }
         }
         })*
     };
@@ -109,6 +119,7 @@ pub trait SimdField:
 {
     const ZERO: Self;
     const ONE: Self;
+    const EPS: Self;
     const LANES: NonZeroUsize;
 
     type Element: SimdField;
@@ -126,6 +137,10 @@ pub trait SimdField:
     fn abs(self) -> Self;
 
     fn max(self, other: Self) -> Self;
+
+    fn exp(self) -> Self;
+
+    fn ln(self) -> Self;
 }
 
 macro_rules! primitive_float_simd_field_impl {
@@ -135,6 +150,7 @@ macro_rules! primitive_float_simd_field_impl {
         impl SimdField for $t {
             const ZERO: Self = 0.0;
             const ONE: Self = 1.0;
+            const EPS: Self = Self::EPSILON;
             const LANES: NonZeroUsize = NonZeroUsize::new(1).unwrap();
             type Element = Self;
 
@@ -171,6 +187,16 @@ macro_rules! primitive_float_simd_field_impl {
             #[inline(always)]
             fn max(self, other: Self) -> Self {
                 self.max(other)
+            }
+
+            #[inline(always)]
+            fn exp(self) -> Self {
+                self.exp()
+            }
+
+            #[inline(always)]
+            fn ln(self) -> Self {
+                self.ln()
             }
         }
         )*

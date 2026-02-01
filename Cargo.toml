@@ -11,6 +11,7 @@ bumpalo = {version = "3.14.0", features= ["boxed", "collections"]}
 cfg-if = "1.0.4"
 
 [dev-dependencies]
+approx = "0.5.1"
 criterion = {version = "0.7.0", features = ["html_reports"]}
 
 
