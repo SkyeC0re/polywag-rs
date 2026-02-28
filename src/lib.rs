@@ -37,7 +37,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
     /// Evaluates the polynomial at the given values and allocates the results inside the workspace.
     #[inline]
-    pub fn evaluate_slice<'a>(&self, ws: &'a Bump, xs: &[T]) -> [BBox<'a, [T]>; R] {
+    pub fn evaluate_slice_ws<'a>(&self, ws: &'a Bump, xs: &[T]) -> [BBox<'a, [T]>; R] {
         let mut xv = T::SimdT::ZERO;
         self.coeffs.dims().map(|coeffs| unsafe {
             let mut bvec = BVec::with_capacity_in(xs.len(), ws);
@@ -178,12 +178,11 @@ impl<const R: usize, T: SimdAble> Polynomial<R, T> {
         let ws_ptr = NonNull::from_mut(ws);
 
         Reset {
-            data: mem::ManuallyDrop::new(self.inner.evaluate_slice(ws, xs)),
+            data: mem::ManuallyDrop::new(self.inner.evaluate_slice_ws(ws, xs)),
             ws: ws_ptr,
             _p: PhantomData,
         }
     }
-
     /// Deallocates the workspace, freeing up any allocated memory. After this is called, further operations on the polynomial will likely
     /// require workspace reallocation again.
     #[inline(always)]
@@ -193,18 +192,18 @@ impl<const R: usize, T: SimdAble> Polynomial<R, T> {
 }
 
 impl<const R: usize, T: SimdAble> Deref for Polynomial<R, T> {
-    type Target = Coeffs<R, T>;
+    type Target = RawPolynomial<R, T>;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        &self.inner.coeffs
+        &self.inner
     }
 }
 
 impl<const R: usize, T: SimdAble> DerefMut for Polynomial<R, T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner.coeffs
+        &mut self.inner
     }
 }
 
