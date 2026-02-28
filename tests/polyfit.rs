@@ -103,7 +103,7 @@ fn degeneracy_short_circuit<T: TestableSimd>() {
     assert_abs_diff_eq!(poly[0][1], T::ONE, epsilon = eps);
 }
 
-/// Degeneracies, such as duplicate `x` samples or zero weighted, should decrease the maximum fitted degree.
+/// Tests a function to ensure a minimal least squares fit is produced (up to our selected epsilon).
 #[track_caller]
 fn test_minimal_fit<T: TestableSimd>(
     w: fn(T) -> T,
@@ -152,7 +152,7 @@ fn test_minimal_fit<T: TestableSimd>(
                     .unwrap_or(T::ZERO);
 
             assert!(
-                avg_err <= jitter_avg_err + eps(),
+                avg_err < jitter_avg_err + eps(),
                 "Non optimal fit produced. Improved from {avg_err:?} to {jitter_avg_err:?} when adding {jitter:?} to fit polynomial coefficient {i}"
             );
             poly[0][i] = p_bckp;
@@ -192,6 +192,30 @@ macro_rules! test_type {
                     |x| x*x + $t::from_usize(5) * x - $t::from_usize(1),
                     samples,
                     1,
+                    $t::from_usize(100) * eps::<$t>(),
+                )
+            }
+
+            #[test]
+            fn [<$t _optimal_fit_test_2>]() {
+                let samples = 20;
+                test_minimal_fit::<$t>(
+                    |_| $t::from_usize(1),
+                    |x| $t::from_usize(1) / (x + $t::from_usize(1)),
+                    samples,
+                    3,
+                    $t::from_usize(100) * eps::<$t>(),
+                )
+            }
+
+            #[test]
+            fn [<$t _optimal_fit_test_3>]() {
+                let samples = 20;
+                test_minimal_fit::<$t>(
+                    |x| x,
+                    |x| $t::exp(x),
+                    samples,
+                    3,
                     $t::from_usize(100) * eps::<$t>(),
                 )
             }

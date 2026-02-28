@@ -224,7 +224,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
             return;
         }
 
-        // Each iteration the highest element of each dimension is overwritten, not modified. As such
+        // In each iteration the highest element of each dimension is overwritten, not modified. As such
         // we need not worry about stale non-zero values still being present.
         self.coeffs.set_len(max_coeffs);
 
