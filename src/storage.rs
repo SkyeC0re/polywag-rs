@@ -18,10 +18,10 @@ pub struct Coeffs<const R: usize, T: SimdAble> {
 
 impl<const R: usize, T: SimdAble> Coeffs<R, T> {
     const MAX_CAP: usize = const {
-        if R > isize::MAX as _ {
-            panic!("Maximimum dimensions exceeded")
-        } else if R == 0 {
-            isize::MAX as _
+        if R == 0 {
+            0
+        } else if R > isize::MAX as usize {
+            panic!("Maximimum dimensions exceeded");
         } else {
             isize::MAX as usize / R
         }
@@ -44,6 +44,10 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
 
     #[inline(always)]
     pub(crate) fn ensure_capacity(&mut self, cap: usize) {
+        if R == 0 {
+            return;
+        }
+
         if cap > Self::MAX_CAP {
             panic!("Maximum capacity exceeded");
         }
@@ -56,20 +60,36 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
     /// than the current length then **higher order coefficients are truncated**. If the new length is larger than the
     /// current length then the added higher order coefficients are set to zero.
     pub fn set_len(&mut self, len: usize) {
+        if R == 0 {
+            // Prevent length changes from zero and out of bounds indexing when there are no range dimensions.
+            return;
+        }
+
         if self.len == len {
             return;
         }
 
         if self.len > len {
-            // Safety: We need not call `Drop` on anything, as `T` is `SimdAble` which must be `Copy`.
+            let slab = self.slab.spare_capacity_mut();
+
+            unsafe {
+                for e in slab.get_unchecked_mut(len..self.len) {
+                    e.assume_init_drop();
+                }
+            }
+
             let mut i = 1;
             while i < R {
                 unsafe {
                     ptr::copy(
-                        self.slab.as_ptr().offset((self.len * i) as _),
-                        self.slab.as_mut_ptr().offset((len * i) as _),
+                        slab.as_ptr().offset((self.len * i) as _),
+                        slab.as_mut_ptr().offset((len * i) as _),
                         len,
                     );
+
+                    for e in slab.get_unchecked_mut((self.len * i + len)..(self.len * (i + 1))) {
+                        e.assume_init_drop();
+                    }
                 }
                 i += 1;
             }
@@ -80,7 +100,7 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
                 self.slab
                     .spare_capacity_mut()
                     .get_unchecked_mut((self.len * R)..(len * R))
-                    .fill(MaybeUninit::new(T::ZERO));
+                    .fill_with(|| MaybeUninit::new(T::SF_ZERO));
             }
 
             let mut i = R;

@@ -12,10 +12,10 @@ macro_rules! wide_float_simd_field_impl {
    ( $($name:ty : $elm:ty : $lanes:expr),* ) => {
         $(paste! {
         impl SimdField for $name {
-            const ZERO: Self = Self::ZERO;
-            const ONE: Self = Self::ONE;
-            const EPS: Self =  Self::splat(Self::Element::EPSILON);
-            const LANES: NonZeroUsize = NonZeroUsize::new($lanes).unwrap();
+            const SF_ZERO: Self = Self::ZERO;
+            const SF_ONE: Self = Self::ONE;
+            const SF_EPS: Self =  Self::splat(Self::Element::EPSILON);
+            const SF_LANES: NonZeroUsize = NonZeroUsize::new($lanes).unwrap();
             type Element = $elm;
 
             #[inline(always)]
@@ -117,10 +117,10 @@ pub trait SimdField:
     + Neg<Output = Self>
     + PartialEq
 {
-    const ZERO: Self;
-    const ONE: Self;
-    const EPS: Self;
-    const LANES: NonZeroUsize;
+    const SF_ZERO: Self;
+    const SF_ONE: Self;
+    const SF_EPS: Self;
+    const SF_LANES: NonZeroUsize;
 
     type Element: SimdField;
 
@@ -148,10 +148,10 @@ macro_rules! primitive_float_simd_field_impl {
         $(
 
         impl SimdField for $t {
-            const ZERO: Self = 0.0;
-            const ONE: Self = 1.0;
-            const EPS: Self = Self::EPSILON;
-            const LANES: NonZeroUsize = NonZeroUsize::new(1).unwrap();
+            const SF_ZERO: Self = 0.0;
+            const SF_ONE: Self = 1.0;
+            const SF_EPS: Self = Self::EPSILON;
+            const SF_LANES: NonZeroUsize = NonZeroUsize::new(1).unwrap();
             type Element = Self;
 
             #[inline(always)]
@@ -208,7 +208,7 @@ primitive_float_simd_field_impl![f64, f32];
 pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
-    fn is_finite(self) -> bool;
+    fn is_finite(&self) -> bool;
 
     fn from_usize(v: usize) -> Self;
 }
@@ -220,8 +220,8 @@ macro_rules! wide_simd_able_impl {
             type SimdT = $simdt;
 
             #[inline(always)]
-            fn is_finite(self) -> bool {
-                self.is_finite()
+            fn is_finite(&self) -> bool {
+                (*self).is_finite()
             }
 
             #[inline(always)]

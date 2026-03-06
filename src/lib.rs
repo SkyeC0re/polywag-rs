@@ -38,11 +38,11 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
     /// Evaluates the polynomial at the given values and allocates the results inside the workspace.
     #[inline]
     pub fn evaluate_slice_ws<'a>(&self, ws: &'a Bump, xs: &[T]) -> [BBox<'a, [T]>; R] {
-        let mut xv = T::SimdT::ZERO;
+        let mut xv = T::SimdT::SF_ZERO;
         self.coeffs.dims().map(|coeffs| unsafe {
             let mut bvec = BVec::with_capacity_in(xs.len(), ws);
             let mut data_ptr = bvec.as_mut_ptr();
-            for chunk in xs.chunks(T::SimdT::LANES.get()) {
+            for chunk in xs.chunks(T::SimdT::SF_LANES.get()) {
                 ptr::copy_nonoverlapping(
                     chunk.as_ptr(),
                     xv.as_mut_slice().as_mut_ptr() as _,
@@ -51,7 +51,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
                 let eval = eval_slice_horner(coeffs, xv);
                 ptr::copy_nonoverlapping(eval.as_slice().as_ptr(), data_ptr, chunk.len());
-                data_ptr = data_ptr.offset(T::SimdT::LANES.get() as _);
+                data_ptr = data_ptr.offset(T::SimdT::SF_LANES.get() as _);
             }
 
             bvec.set_len(xs.len());
@@ -61,11 +61,11 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
     #[inline]
     pub fn evaluate_array<const N: usize>(&self, xs: [T; N]) -> [[T; N]; R] {
-        let mut xv = T::SimdT::ZERO;
+        let mut xv = T::SimdT::SF_ZERO;
         self.coeffs.dims().map(|coeffs| unsafe {
             let mut arr = MaybeUninit::<[T; N]>::uninit();
             let mut data_ptr: *mut T = arr.as_mut_ptr() as _;
-            for chunk in xs.chunks(T::SimdT::LANES.get()) {
+            for chunk in xs.chunks(T::SimdT::SF_LANES.get()) {
                 ptr::copy_nonoverlapping(
                     chunk.as_ptr(),
                     xv.as_mut_slice().as_mut_ptr() as _,
@@ -74,7 +74,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
 
                 let eval = eval_slice_horner(coeffs, xv);
                 ptr::copy_nonoverlapping(eval.as_slice().as_ptr(), data_ptr, chunk.len());
-                data_ptr = data_ptr.offset(T::SimdT::LANES.get() as _);
+                data_ptr = data_ptr.offset(T::SimdT::SF_LANES.get() as _);
             }
 
             arr.assume_init()
@@ -115,7 +115,7 @@ impl<const R: usize, T: SimdAble> RawPolynomial<R, T> {
                 }
             }
 
-            unsafe { *coeffs.get_unchecked_mut(0) = T::ZERO };
+            unsafe { *coeffs.get_unchecked_mut(0) = T::SF_ZERO };
         }
     }
 
@@ -244,7 +244,7 @@ impl<const R: usize, T: SimdAble> Polynomial<R, T> {}
 
 #[inline]
 fn eval_slice_horner<SF: SimdField>(slice: &[SF::Element], x: SF) -> SF {
-    let mut result = SF::ZERO;
+    let mut result = SF::SF_ZERO;
     for ci in slice.into_iter().rev().copied() {
         result = SF::mul_add(result, x, SF::splat(ci));
     }
