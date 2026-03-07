@@ -11,7 +11,12 @@ use core::slice;
 use crate::simd::SimdAble;
 
 #[derive(Clone)]
-pub struct Coeffs<const R: usize, T: SimdAble> {
+pub struct Coeffs<const R: usize, T>
+where
+    // We rely on `T` being `Copy` for safety. We enforce this via `SimdAble`, by not having `Copy` it in the implementation,
+    // ensuring that if ever `SimdAble` drops the `Copy` requirement, that this will need to be reworked as well.
+    T: SimdAble + Copy,
+{
     slab: Vec<T>,
     len: usize,
 }
@@ -72,11 +77,7 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
         if self.len > len {
             let slab = self.slab.spare_capacity_mut();
 
-            unsafe {
-                for e in slab.get_unchecked_mut(len..self.len) {
-                    e.assume_init_drop();
-                }
-            }
+            // Safety: We need not drop anything, as we guarantee that `T` must be `Copy`.
 
             let mut i = 1;
             while i < R {
@@ -86,29 +87,22 @@ impl<const R: usize, T: SimdAble> Coeffs<R, T> {
                         slab.as_mut_ptr().offset((len * i) as _),
                         len,
                     );
-
-                    for e in slab.get_unchecked_mut((self.len * i + len)..(self.len * (i + 1))) {
-                        e.assume_init_drop();
-                    }
                 }
                 i += 1;
             }
         } else {
             self.ensure_capacity(len * R);
+            let slab = self.slab.spare_capacity_mut();
 
             unsafe {
-                self.slab
-                    .spare_capacity_mut()
-                    .get_unchecked_mut((self.len * R)..(len * R))
+                slab.get_unchecked_mut((self.len * R)..(len * R))
                     .fill_with(|| MaybeUninit::new(T::SF_ZERO));
             }
 
             let mut i = R;
             while i > 1 {
                 unsafe {
-                    self.slab
-                        .spare_capacity_mut()
-                        .get_unchecked_mut((self.len * (i - 1))..(len * i))
+                    slab.get_unchecked_mut((self.len * (i - 1))..(len * i))
                         .rotate_right(i - 1);
                 }
 

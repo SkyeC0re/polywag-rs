@@ -10,8 +10,15 @@ use polywag::{
 
 use crate::common::{F256, TestableSimd};
 
+const TEST_EPS_PERCENTAGE: usize = 85;
+
+/// Get the testing epsilon defined by `TEST_EPS_PERCENTAGE`. Specifically, given the test epsilon ratio $r$
+/// and `T`'s machine epsilon $\epsilon < 1$, we define the test epsilon as:
+/// $$
+///     \epsilon_t = e^{r \ln(\epsilon)}
+/// $$
 fn test_eps<T: TestableSimd>() -> T {
-    let ratio = T::from_usize(85) / T::from_usize(100);
+    let ratio = T::from_usize(TEST_EPS_PERCENTAGE) / T::from_usize(100);
 
     T::exp(ratio * T::SF_EPS.ln())
 }
@@ -210,8 +217,8 @@ macro_rules! test_type {
             }
 
             #[test]
-            fn [<$t _optimal_fit_test_1>]() {
-                let samples = 20;
+            fn [<$t _optimal_fit_test_polynomial>]() {
+                let samples = 100;
                 test_minimal_fit::<$t>(
                     |_| $t::from_usize(1),
                     |x| x*x + $t::from_usize(5) * x - $t::from_usize(1),
@@ -221,8 +228,8 @@ macro_rules! test_type {
             }
 
             #[test]
-            fn [<$t _optimal_fit_test_2>]() {
-                let samples = 20;
+            fn [<$t _optimal_fit_test_reciprocal>]() {
+                let samples = 100;
                 test_minimal_fit::<$t>(
                     |_| $t::from_usize(1),
                     |x| $t::from_usize(1) / (x + $t::from_usize(1)),
@@ -232,13 +239,39 @@ macro_rules! test_type {
             }
 
             #[test]
-            fn [<$t _optimal_fit_test_3>]() {
-                let samples = 20;
+            fn [<$t _optimal_fit_test_exp>]() {
+                let samples = 100;
                 test_minimal_fit::<$t>(
                     |x| x,
                     |x| $t::exp(x),
                     samples,
                     3,
+                )
+            }
+
+            #[test]
+            fn [<$t _optimal_fit_test_ln>]() {
+                let samples = 100;
+                test_minimal_fit::<$t>(
+                    |x| x,
+                    |x| $t::ln(x + $t::SF_ONE),
+                    samples,
+                    5,
+                )
+            }
+
+              #[test]
+            fn [<$t _optimal_fit_test_discontinuity>]() {
+                let samples = 100;
+
+                test_minimal_fit::<$t>(
+                    |_| $t::from_usize(1),
+                    |x| {
+                        let half = $t::SF_ONE / $t::from_usize(2);
+                        if x < half { $t::SF_ZERO} else {$t::SF_ONE}
+                    },
+                    samples,
+                    5,
                 )
             }
         }
