@@ -3,7 +3,7 @@ use core::{
     fmt::Debug,
     num::NonZeroUsize,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
-    slice,
+    ptr, slice,
 };
 
 use pastey::paste;
@@ -61,6 +61,11 @@ macro_rules! wide_float_simd_field_impl {
             #[inline(always)]
             fn ln(self) -> Self {
                 self.ln()
+            }
+
+            #[inline(always)]
+            fn recip(self) -> Self {
+               Self::SF_ONE / self
             }
         }
         })*
@@ -121,6 +126,7 @@ pub trait SimdField:
     const SF_ONE: Self;
     const SF_EPS: Self;
     const SF_LANES: NonZeroUsize;
+    const SF_L: usize = const { Self::SF_LANES.get() };
 
     type Element: SimdField;
 
@@ -141,6 +147,8 @@ pub trait SimdField:
     fn exp(self) -> Self;
 
     fn ln(self) -> Self;
+
+    fn recip(self) -> Self;
 }
 
 macro_rules! primitive_float_simd_field_impl {
@@ -198,6 +206,11 @@ macro_rules! primitive_float_simd_field_impl {
             fn ln(self) -> Self {
                 self.ln()
             }
+
+            #[inline(always)]
+            fn recip(self) -> Self {
+                self.recip()
+            }
         }
         )*
     };
@@ -205,6 +218,7 @@ macro_rules! primitive_float_simd_field_impl {
 
 primitive_float_simd_field_impl![f64, f32];
 
+// Critically we require that the element be zeroable.
 pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
@@ -237,3 +251,73 @@ wide_simd_able_impl![
     f32 : MaxSimdf32,
     f64 : MaxSimdf64
 ];
+
+#[inline(always)]
+pub(crate) unsafe fn zip_compute_assign<
+    const A: usize,
+    const RA: usize,
+    const R: usize,
+    T: SimdAble,
+    F: FnMut(&mut [T::SimdT; RA], &[T::SimdT; R]) -> [T::SimdT; A],
+>(
+    mut assigns: [&mut [T]; A],
+    mut read_assigns: [&mut [T]; RA],
+    reads: [&[T]; R],
+    len: usize,
+    mut f: F,
+) {
+    if len == 0 {
+        return;
+    }
+
+    let mut read_assigns_simd = [<T::SimdT>::SF_ONE; RA];
+    let mut reads_simd = [<T::SimdT>::SF_ONE; R];
+
+    let mut offset = 0;
+    while offset < len {
+        let chunk_size = (len - offset).min(T::SimdT::SF_LANES.get());
+        unsafe {
+            for (dim, read_assign) in read_assigns.iter().enumerate() {
+                ptr::copy_nonoverlapping::<T>(
+                    read_assign.get_unchecked(offset) as *const T,
+                    read_assigns_simd
+                        .get_unchecked_mut(dim)
+                        .as_mut_slice()
+                        .as_mut_ptr(),
+                    chunk_size,
+                );
+            }
+
+            for (dim, read) in reads.iter().enumerate() {
+                ptr::copy_nonoverlapping::<T>(
+                    read.get_unchecked(offset) as *const T,
+                    reads_simd
+                        .get_unchecked_mut(dim)
+                        .as_mut_slice()
+                        .as_mut_ptr(),
+                    chunk_size,
+                );
+            }
+
+            let assigns_simd = f(&mut read_assigns_simd, &reads_simd);
+
+            for (dim, assign) in assigns.iter_mut().enumerate() {
+                ptr::copy_nonoverlapping::<T>(
+                    assigns_simd.get_unchecked(dim).as_slice().as_ptr(),
+                    assign.get_unchecked_mut(offset) as *mut T,
+                    chunk_size,
+                );
+            }
+
+            for (dim, read_assign) in read_assigns.iter_mut().enumerate() {
+                ptr::copy_nonoverlapping::<T>(
+                    read_assigns_simd.get_unchecked(dim).as_slice().as_ptr(),
+                    read_assign.get_unchecked_mut(offset) as *mut T,
+                    chunk_size,
+                );
+            }
+        }
+
+        offset += T::SimdT::SF_LANES.get();
+    }
+}

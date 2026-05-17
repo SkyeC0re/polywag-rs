@@ -172,6 +172,11 @@ impl SimdField for F256 {
     fn ln(self) -> Self {
         Self((&self.0).ln())
     }
+
+    #[inline(always)]
+    fn recip(self) -> Self {
+        Self((&self.0).recip())
+    }
 }
 
 impl SimdAble for F256 {

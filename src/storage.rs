@@ -3,12 +3,74 @@ extern crate alloc;
 use alloc::vec::Vec;
 use core::array;
 use core::mem::MaybeUninit;
+use core::ops::Deref;
+use core::ops::DerefMut;
 use core::ops::Index;
 use core::ops::IndexMut;
 use core::ptr;
 use core::slice;
 
 use crate::simd::SimdAble;
+
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct KP1Array<const K: usize, T>(T, [T; K]);
+
+impl<const K: usize, T> KP1Array<K, T> {
+    pub const LEN: usize = K + 1;
+}
+
+impl<const K: usize, T: Copy> KP1Array<K, T> {
+    pub const fn new(v: T) -> Self {
+        Self(v, [v; K])
+    }
+}
+
+impl<const K: usize, T> Deref for KP1Array<K, T> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe { slice::from_raw_parts((self as *const Self).cast::<T>(), K + 1) }
+    }
+}
+
+impl<const K: usize, T> DerefMut for KP1Array<K, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + 1) }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct TwoKP1Array<const K: usize, T>(T, [T; K], [T; K]);
+
+impl<const K: usize, T> TwoKP1Array<K, T> {
+    pub const LEN: usize = K + K + 1;
+}
+
+impl<const K: usize, T> Deref for TwoKP1Array<K, T> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe { slice::from_raw_parts((self as *const Self).cast::<T>(), K + K + 1) }
+    }
+}
+
+impl<const K: usize, T> DerefMut for TwoKP1Array<K, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + K + 1) }
+    }
+}
+
+impl<const K: usize, T: Copy> TwoKP1Array<K, T> {
+    pub const fn new(v: T) -> Self {
+        Self(v, [v; K], [v; K])
+    }
+}
 
 #[derive(Clone)]
 pub struct Coeffs<const R: usize, T>
