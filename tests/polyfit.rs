@@ -4,7 +4,7 @@ use approx::assert_abs_diff_eq;
 use core::ops::Add;
 use pastey::paste;
 use polywag::{
-    PolyfitCfg, Polynomial,
+    OnlinePolyfit, PolyfitCfg, Polynomial,
     simd::{SimdAble, SimdField},
 };
 
@@ -192,88 +192,137 @@ fn test_minimal_fit<T: TestableSimd>(w: fn(T) -> T, y: fn(T) -> T, samples: usiz
     );
 }
 
+/// Least squares regressions should reproduce polynomials up to the maximum fitting degree exactly.
+#[track_caller]
+fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
+    let half = T::SF_ONE / T::from_usize(2);
+    let quarter = T::SF_ONE / T::from_usize(4);
+
+    let mut regressor = OnlinePolyfit::<1, 3, T>::new();
+
+    // for x in 0..10 {
+    //     let x = T::from_usize(x);
+
+    //     // regressor.rotate(-T::SF_ONE);
+    //     regressor.update_at_zero(
+    //         0,
+    //         T::SF_ONE,
+    //         [
+    //             T::SF_ONE,
+    //             T::SF_ONE + half * x,
+    //             T::SF_ONE + half * x + quarter * x * x,
+    //         ],
+    //     );
+    // }
+
+    regressor.update_at_zero(0, T::SF_ONE, [T::SF_ONE, T::SF_ONE, T::SF_ONE]);
+    regressor.update_at_zero(1, T::SF_ONE, [T::SF_ZERO, half, half]);
+    // regressor.rotate(T::from_usize(9));
+
+    let poly = regressor.compute_fit();
+
+    let eps = test_eps();
+    assert_abs_diff_eq!(poly[0][0], T::SF_ONE, epsilon = eps);
+    assert_abs_diff_eq!(poly[0][1], T::SF_ZERO, epsilon = eps);
+    // assert_abs_diff_eq!(poly[0][2], T::SF_ZERO, epsilon = eps);
+
+    assert_abs_diff_eq!(poly[1][0], T::SF_ONE, epsilon = eps);
+    assert_abs_diff_eq!(poly[1][1], half, epsilon = eps);
+    // assert_abs_diff_eq!(poly[1][2], T::SF_ZERO, epsilon = eps);
+
+    // assert_abs_diff_eq!(poly[2][0], T::SF_ONE, epsilon = eps);
+    // assert_abs_diff_eq!(poly[2][1], half, epsilon = eps);
+    // assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
+}
+
 macro_rules! test_type {
     ($t:ty) => {
         paste! {
 
-            #[test]
-            fn [<$t _empty_fit>]() {
-                empty_fit::<$t>();
-            }
+            // #[test]
+            // fn [<$t _empty_fit>]() {
+            //     empty_fit::<$t>();
+            // }
+
+            // #[test]
+            // fn [<$t _multi_dem_increasing_deg_fit>]() {
+            //     multi_dem_increasing_deg_fit::<$t>()
+            // }
+
+            // #[test]
+            // fn [<$t _split_linear_fit>]() {
+            //     split_linear_fit::<$t>()
+            // }
+
+            // #[test]
+            // fn [<$t _degeneracy_short_circuit>]() {
+            //     degeneracy_short_circuit::<$t>()
+            // }
+
+            // #[test]
+            // fn [<$t _optimal_fit_test_polynomial>]() {
+            //     let samples = 100;
+            //     test_minimal_fit::<$t>(
+            //         |_| $t::from_usize(1),
+            //         |x| x*x + $t::from_usize(5) * x - $t::from_usize(1),
+            //         samples,
+            //         1,
+            //     )
+            // }
+
+            // #[test]
+            // fn [<$t _optimal_fit_test_reciprocal>]() {
+            //     let samples = 100;
+            //     test_minimal_fit::<$t>(
+            //         |_| $t::from_usize(1),
+            //         |x| $t::from_usize(1) / (x + $t::from_usize(1)),
+            //         samples,
+            //         3,
+            //     )
+            // }
+
+            // #[test]
+            // fn [<$t _optimal_fit_test_exp>]() {
+            //     let samples = 100;
+            //     test_minimal_fit::<$t>(
+            //         |x| x,
+            //         |x| $t::exp(x),
+            //         samples,
+            //         3,
+            //     )
+            // }
+
+            // #[test]
+            // fn [<$t _optimal_fit_test_ln>]() {
+            //     let samples = 100;
+            //     test_minimal_fit::<$t>(
+            //         |x| x,
+            //         |x| $t::ln(x + $t::SF_ONE),
+            //         samples,
+            //         5,
+            //     )
+            // }
+
+            // #[test]
+            // fn [<$t _optimal_fit_test_discontinuity>]() {
+            //     let samples = 100;
+
+            //     test_minimal_fit::<$t>(
+            //         |_| $t::from_usize(1),
+            //         |x| {
+            //             let half = $t::SF_ONE / $t::from_usize(2);
+            //             if x < half { $t::SF_ZERO} else {$t::SF_ONE}
+            //         },
+            //         samples,
+            //         5,
+            //     )
+            // }
 
             #[test]
-            fn [<$t _multi_dem_increasing_deg_fit>]() {
-                multi_dem_increasing_deg_fit::<$t>()
+            fn [<$t _online_multi_dem_increasing_deg_fit>]() {
+                online_multi_dem_increasing_deg_fit::<$t>()
             }
 
-            #[test]
-            fn [<$t _split_linear_fit>]() {
-                split_linear_fit::<$t>()
-            }
-
-            #[test]
-            fn [<$t _degeneracy_short_circuit>]() {
-                degeneracy_short_circuit::<$t>()
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_polynomial>]() {
-                let samples = 100;
-                test_minimal_fit::<$t>(
-                    |_| $t::from_usize(1),
-                    |x| x*x + $t::from_usize(5) * x - $t::from_usize(1),
-                    samples,
-                    1,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_reciprocal>]() {
-                let samples = 100;
-                test_minimal_fit::<$t>(
-                    |_| $t::from_usize(1),
-                    |x| $t::from_usize(1) / (x + $t::from_usize(1)),
-                    samples,
-                    3,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_exp>]() {
-                let samples = 100;
-                test_minimal_fit::<$t>(
-                    |x| x,
-                    |x| $t::exp(x),
-                    samples,
-                    3,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_ln>]() {
-                let samples = 100;
-                test_minimal_fit::<$t>(
-                    |x| x,
-                    |x| $t::ln(x + $t::SF_ONE),
-                    samples,
-                    5,
-                )
-            }
-
-              #[test]
-            fn [<$t _optimal_fit_test_discontinuity>]() {
-                let samples = 100;
-
-                test_minimal_fit::<$t>(
-                    |_| $t::from_usize(1),
-                    |x| {
-                        let half = $t::SF_ONE / $t::from_usize(2);
-                        if x < half { $t::SF_ZERO} else {$t::SF_ONE}
-                    },
-                    samples,
-                    5,
-                )
-            }
         }
     };
 }

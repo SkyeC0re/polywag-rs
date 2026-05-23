@@ -2,6 +2,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use core::array;
+use core::fmt::Debug;
 use core::mem::MaybeUninit;
 use core::ops::Deref;
 use core::ops::DerefMut;
@@ -12,9 +13,16 @@ use core::slice;
 
 use crate::simd::SimdAble;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[repr(C)]
 pub struct KP1Array<const K: usize, T>(T, [T; K]);
+
+impl<const K: usize, T: Debug> Debug for KP1Array<K, T> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
 
 impl<const K: usize, T> KP1Array<K, T> {
     pub const LEN: usize = K + 1;
@@ -42,9 +50,16 @@ impl<const K: usize, T> DerefMut for KP1Array<K, T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[repr(C)]
 pub struct TwoKP1Array<const K: usize, T>(T, [T; K], [T; K]);
+
+impl<const K: usize, T: Debug> Debug for TwoKP1Array<K, T> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
 
 impl<const K: usize, T> TwoKP1Array<K, T> {
     pub const LEN: usize = K + K + 1;
@@ -69,6 +84,53 @@ impl<const K: usize, T> DerefMut for TwoKP1Array<K, T> {
 impl<const K: usize, T: Copy> TwoKP1Array<K, T> {
     pub const fn new(v: T) -> Self {
         Self(v, [v; K], [v; K])
+    }
+}
+
+/// Stores all sums $\sum_{i=1}^{N_l} w_{l, i} x_{l, i}^k$ in the following form (l, k):
+/// (K, 0)
+/// (K - 1, 0), (K - 1, 1), (K - 1, 2)
+///                     .
+///                     .
+///                     .
+/// (1, 0)    , (1, 1)    , (1, 2)    , ... , (1, 2K - 2)
+/// (0, 0)    , (0, 1)    , (1, 2)    , ... , (0, 2K - 2), (0, 2K - 1), (0, 2K)
+
+#[derive(Clone)]
+#[repr(C)]
+pub(crate) struct XlkSums<const K: usize, T>(T, [[T; K]; 2], [[T; K]; K]);
+
+impl<const K: usize, T> XlkSums<K, T> {
+    const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
+
+    #[inline]
+    pub const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_unchecked(&self, l: usize) -> &[T] {
+        unsafe {
+            slice::from_raw_parts(
+                ((&self.0) as *const T).offset((l * l) as _),
+                ((K - l) << 1) + 1,
+            )
+        }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_unchecked_mut(&mut self, l: usize) -> &mut [T] {
+        unsafe {
+            slice::from_raw_parts_mut(
+                ((&mut self.0) as *mut T).offset((l * l) as _),
+                ((K - l) << 1) + 1,
+            )
+        }
+    }
+
+    #[inline(always)]
+    pub const fn as_raw_slice_mut(&mut self) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut T, Self::LEN) }
     }
 }
 
