@@ -198,41 +198,51 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     let half = T::SF_ONE / T::from_usize(2);
     let quarter = T::SF_ONE / T::from_usize(4);
 
-    let mut regressor = OnlinePolyfit::<1, 3, T>::new();
+    let mut regressor = OnlinePolyfit::<2, 3, T>::new();
 
-    // for x in 0..10 {
-    //     let x = T::from_usize(x);
+    for x in 0..10 {
+        let x = T::from_usize(x);
 
-    //     // regressor.rotate(-T::SF_ONE);
-    //     regressor.update_at_zero(
-    //         0,
-    //         T::SF_ONE,
-    //         [
-    //             T::SF_ONE,
-    //             T::SF_ONE + half * x,
-    //             T::SF_ONE + half * x + quarter * x * x,
-    //         ],
-    //     );
-    // }
+        regressor.update_at_x(
+            0,
+            T::SF_ONE,
+            x,
+            [
+                T::SF_ONE,
+                T::SF_ONE + half * x,
+                T::SF_ONE + half * x + quarter * x * x,
+            ],
+        );
 
-    regressor.update_at_zero(0, T::SF_ONE, [T::SF_ONE, T::SF_ONE, T::SF_ONE]);
-    regressor.update_at_zero(1, T::SF_ONE, [T::SF_ZERO, half, half]);
+        // regressor.rotate(-T::SF_ONE);
+    }
+
+    // regressor.rotate(T::from_usize(10));
+
+    // regressor.update_at_zero(0, T::SF_ONE, [T::SF_ONE, T::SF_ONE, T::SF_ONE]);
+    // regressor.update_at_zero(1, T::SF_ONE, [T::SF_ZERO, half, half]);
+
+    // regressor.rotate(T::SF_ONE);
+    // regressor.rotate(T::SF_ONE);
+    // regressor.rotate(-T::SF_ONE);
+    // regressor.rotate(-T::SF_ONE);
     // regressor.rotate(T::from_usize(9));
 
     let poly = regressor.compute_fit();
 
     let eps = test_eps();
+    println!("Poly (eps: {eps:?}): \n{poly:?}");
     assert_abs_diff_eq!(poly[0][0], T::SF_ONE, epsilon = eps);
     assert_abs_diff_eq!(poly[0][1], T::SF_ZERO, epsilon = eps);
-    // assert_abs_diff_eq!(poly[0][2], T::SF_ZERO, epsilon = eps);
+    assert_abs_diff_eq!(poly[0][2], T::SF_ZERO, epsilon = eps);
 
     assert_abs_diff_eq!(poly[1][0], T::SF_ONE, epsilon = eps);
     assert_abs_diff_eq!(poly[1][1], half, epsilon = eps);
-    // assert_abs_diff_eq!(poly[1][2], T::SF_ZERO, epsilon = eps);
+    assert_abs_diff_eq!(poly[1][2], T::SF_ZERO, epsilon = eps);
 
-    // assert_abs_diff_eq!(poly[2][0], T::SF_ONE, epsilon = eps);
-    // assert_abs_diff_eq!(poly[2][1], half, epsilon = eps);
-    // assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
+    assert_abs_diff_eq!(poly[2][0], T::SF_ONE, epsilon = eps);
+    assert_abs_diff_eq!(poly[2][1], half, epsilon = eps);
+    assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
 }
 
 macro_rules! test_type {

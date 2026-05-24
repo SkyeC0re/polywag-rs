@@ -374,11 +374,13 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
         let old_xlks = self.xlks.clone();
         let mut coeffs = TwoKP1Array::<K, T>::new(T::SF_ZERO);
 
-        for l in 0..=K {
+        // Iterating in reverse order guarantees that we are stepping through the `xlk` elements in
+        // storage order.
+        for l in (0..=K).rev() {
             unsafe {
                 *coeffs.get_unchecked_mut(0) = T::SF_ONE;
-                let xlks = self.xlks.get_unchecked_mut(l);
-                let old_xlks = old_xlks.get_unchecked(l);
+                let xlks = self.xlks.get_l_xks_mut(l);
+                let old_xlks = old_xlks.get_l_xks(l);
                 for k in 1..(((K - l) << 1) + 1) {
                     let xlk = xlks.get_unchecked_mut(k);
                     *coeffs.get_unchecked_mut(k) = T::SF_ONE;
@@ -449,8 +451,7 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
         };
 
         let w_factorial = w * factorial;
-
-        self.xks[derivative] += w_factorial;
+        unsafe { *self.xlks.get_l_xk_mut(derivative, 0) += w }
 
         for (dim, y) in ys.into_iter().enumerate() {
             let yxk = unsafe {
@@ -461,15 +462,54 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
 
             *yxk = T::mul_add(w_factorial, y, *yxk);
         }
+
+        self.max_l_insertion = derivative;
+    }
+
+    pub fn update_at_x(&mut self, derivative: usize, w: T, x: T, ys: [T; D]) {
+        let l = derivative;
+        if l > K {
+            return;
+        }
+
+        let xks = unsafe { self.xlks.get_l_xks_mut(l) };
+        let mut x_pow = T::SF_ONE;
+        for xk in xks {
+            *xk = w.mul_add(x_pow, *xk);
+            x_pow *= x;
+        }
+
+        let l_factorial = if l == 0 {
+            T::SF_ONE
+        } else {
+            self.factorials_1_up[l - 1]
+        };
+
+        for (dim, y) in ys.into_iter().enumerate() {
+            let yxk_dim = unsafe { self.yxks.get_unchecked_mut(dim) };
+
+            let mut factorial = l_factorial;
+            let mut x_pow = T::SF_ONE;
+            let mut k = l;
+            for yxk in unsafe { yxk_dim.get_unchecked_mut(l..=K) } {
+                let w_factorial = w * factorial;
+                *yxk = w_factorial.mul_add(y * x_pow, *yxk);
+                k += 1;
+                factorial = (factorial / T::from_usize(k - l)) * T::from_usize(k);
+                x_pow *= x;
+            }
+        }
+
+        self.max_l_insertion = l;
     }
 
     #[inline]
     pub fn compute_fit(&self) -> [KP1Array<K, T>; D] {
-        Self::compute_fit_inner(&self.xks, &mut self.yxks.clone())
+        Self::compute_fit_inner(&self.xlks, &mut self.yxks.clone())
     }
 
     fn compute_fit_inner(
-        xks: &TwoKP1Array<K, T>,
+        xlks: &XlkSums<K, T>,
         yxks: &mut [KP1Array<K, T>; D],
     ) -> [KP1Array<K, T>; D] {
         let mut fit = [(); D].map(|_| KP1Array::<K, T>::new(T::SF_ZERO));
@@ -480,83 +520,134 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
         let mut p_k = KP1Array::<K, T>::new(T::SF_ZERO);
         let mut p_k = &mut p_k;
 
-        let gamma_0 = unsafe { *xks.get_unchecked(0) };
-        let gamma_0_recip = gamma_0.recip();
+        println!("{xlks:?}");
 
-        for dim in 0..D {
-            let yxks_dim = unsafe { yxks.get_unchecked_mut(0) };
-            let yx0_dim = unsafe { yxks_dim.get_unchecked_mut(0) };
-            let d_0 = *yx0_dim * gamma_0_recip;
+        unsafe {
+            let gamma_0 = *xlks.get_l_xk(0, 0);
+            let gamma_0_recip = gamma_0.recip();
 
-            // Subtracting here makes zero mathematical differrence:
-            // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
-            // but makes the fit more stable at higher dimensions when the polynomials are not exactly orthogonal.
-            // *yx0_dim = d_0.mul_add(-unsafe { *xks.get_unchecked(0) }, *yx0_dim);
+            for dim in 0..D {
+                let yxks_dim = yxks.get_unchecked_mut(dim);
+                let yx0_dim = yxks_dim.get_unchecked_mut(0);
+                let d_0 = *yx0_dim * gamma_0_recip;
 
-            unsafe { *fit.get_unchecked_mut(dim).get_unchecked_mut(0) = d_0 }
-        }
+                println!("dim={dim}, d_0={d_0:?}");
 
-        let mut min_c_km1 = T::SF_ZERO;
-        let mut gamma_km1_recip = gamma_0_recip;
-        unsafe { *p_km1.get_unchecked_mut(0) = T::SF_ONE };
-        for k in 1..=K {
-            // B_(k-1) = <xP_(k-1), P_(k-1)> / gamma_(k-1)
-            //     = <x^k + [x^(k-2)]P_(k-1) x^(k-2), P_(k-1)>
-            //     = <x^k, P_(k-1)> / gamma_(k-1) + [x^(k-2)]P_(k-1)
-            let mut min_b_km1 = unsafe { *xks.get_unchecked((k << 1) - 1) };
-            for i in (0..(k - 1)).rev() {
-                min_b_km1 = T::mul_add(
-                    unsafe { *p_km1.get_unchecked(i) },
-                    unsafe { *xks.get_unchecked(k + i) },
-                    min_b_km1,
-                );
+                // Subtracting here makes zero mathematical differrence:
+                // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
+                // but makes the fit more stable at higher dimensions when the polynomials are not exactly orthogonal.
+                // *yx0_dim = d_0.mul_add(-unsafe { *xks.get_unchecked(0) }, *yx0_dim);
+
+                *fit.get_unchecked_mut(dim).get_unchecked_mut(0) = d_0;
             }
-            if k > 1 {
-                min_b_km1 =
-                    min_b_km1.mul_add(gamma_km1_recip, unsafe { *p_km1.get_unchecked(k - 2) });
-            }
-            min_b_km1 = -min_b_km1;
 
-            // gamma_k = <P_k, P_k> = <x^k, P_k>
-            let mut gamma_k = unsafe { *xks.get_unchecked(k + k) };
-            unsafe { *p_k.get_unchecked_mut(k) = T::SF_ONE };
+            let mut min_c_km1 = T::SF_ZERO;
+            let mut gamma_km1_recip = gamma_0_recip;
+            *p_km1.get_unchecked_mut(0) = T::SF_ONE;
+            for k in 1..=K {
+                // B_(k-1) = <xP_(k-1), P_(k-1)> / gamma_(k-1)
+                //     = <x^k + [x^(k-2)]P_(k-1) x^(k-2), P_(k-1)>
+                //     = <x^k, P_(k-1)> / gamma_(k-1) + [x^(k-2)]P_(k-1)
 
-            for i in (1..k).rev() {
-                let [pkm1_im1, pkm1_i] =
-                    *unsafe { mem::transmute::<_, &[T; 2]>(p_km1.get_unchecked(i - 1)) };
-                let pkm1_contribution = pkm1_i.mul_add(min_b_km1, pkm1_im1);
+                // <x^k, [x^0]P_(k-1) x^0> contains only the l=0 term. We abuse this to
+                // provide a direct initial value.
+                let mut min_b_km1 = *p_km1.get_unchecked(0) * *xlks.get_l_xk(0, k);
 
-                let pk_i = unsafe { p_k.get_unchecked_mut(i) };
-                *pk_i = pk_i.mul_add(min_c_km1, pkm1_contribution);
+                for k_prime in 1..k {
+                    let mut a = k_prime;
+                    let mut b = k;
+                    let mut mul_coeff = 1;
 
-                gamma_k = pk_i.mul_add(unsafe { *xks.get_unchecked(k + i) }, gamma_k);
-            }
-            unsafe {
+                    let max_deg = k + k_prime;
+                    min_b_km1 = p_km1
+                        .get_unchecked(k_prime)
+                        .mul_add(*xlks.get_l_xk(0, max_deg), min_b_km1);
+
+                    for l in 1..=k_prime {
+                        mul_coeff *= a * b;
+                        a -= 1;
+                        b -= 1;
+                        min_b_km1 = p_km1.get_unchecked(k_prime).mul_add(
+                            T::from_usize(mul_coeff) * *xlks.get_l_xk(l, max_deg - (l << 1)),
+                            min_b_km1,
+                        );
+                    }
+                }
+                if k > 1 {
+                    min_b_km1 = min_b_km1.mul_add(gamma_km1_recip, *p_km1.get_unchecked(k - 2));
+                } else {
+                    min_b_km1 *= gamma_km1_recip;
+                }
+                min_b_km1 = -min_b_km1;
+
                 let pkm1_0 = *p_km1.get_unchecked(0);
                 let pk_0 = p_k.get_unchecked_mut(0);
                 *pk_0 = pk_0.mul_add(min_c_km1, min_b_km1 * pkm1_0);
 
-                gamma_k = pk_0.mul_add(*xks.get_unchecked(k), gamma_k);
-            }
-            println!("P_{k}: {:?} | -B_(k-1): {:?}", p_k, min_b_km1);
+                // gamma_k = <P_k, P_k> = <x^k, P_k>
 
-            let gamma_k_recip = gamma_k.recip();
-            for dim in 0..D {
-                let yxks_dim = unsafe { yxks.get_unchecked_mut(dim) };
+                // <x^k, [x^0]P_k x^0> contains only the l=0 term. We abuse this to
+                // provide a direct initial value.
+                let mut gamma_k = *pk_0 * *xlks.get_l_xk(0, k);
 
-                let mut d_k = unsafe { *yxks_dim.get_unchecked(k) };
-                for i in (0..k).rev() {
-                    d_k = unsafe {
-                        yxks_dim
+                for k_prime in 1..k {
+                    let [pkm1_im1, pkm1_i] =
+                        *mem::transmute::<_, &[T; 2]>(p_km1.get_unchecked(k_prime - 1));
+                    let pkm1_contribution = pkm1_i.mul_add(min_b_km1, pkm1_im1);
+
+                    let pk_i = p_k.get_unchecked_mut(k_prime);
+                    *pk_i = pk_i.mul_add(min_c_km1, pkm1_contribution);
+
+                    let mut a = k_prime;
+                    let mut b = k;
+                    let mut mul_coeff = 1;
+                    let max_deg = k + k_prime;
+                    gamma_k = pk_i.mul_add(*xlks.get_l_xk(0, max_deg), gamma_k);
+
+                    for l in 1..=k_prime {
+                        mul_coeff *= a * b;
+                        a -= 1;
+                        b -= 1;
+                        gamma_k = pk_i.mul_add(
+                            T::from_usize(mul_coeff) * *xlks.get_l_xk(l, max_deg - (l << 1)),
+                            gamma_k,
+                        );
+                    }
+                }
+
+                *p_k.get_unchecked_mut(k) = T::SF_ONE;
+                {
+                    let mut a = k;
+                    let mut mul_coeff = 1;
+                    let max_deg = k << 1;
+
+                    gamma_k += *xlks.get_l_xk(0, max_deg);
+                    for l in 1..=k {
+                        mul_coeff *= a * a;
+                        a -= 1;
+                        gamma_k = T::from_usize(mul_coeff)
+                            .mul_add(*xlks.get_l_xk(l, max_deg - (l << 1)), gamma_k);
+                    }
+                }
+                println!(
+                    "P_{k}: {:?} | -B_(k-1): {:?} | gamma_{k}: {gamma_k:?}",
+                    p_k, min_b_km1
+                );
+
+                let gamma_k_recip = gamma_k.recip();
+                for dim in 0..D {
+                    let yxks_dim = yxks.get_unchecked_mut(dim);
+
+                    let mut d_k = *yxks_dim.get_unchecked(k);
+                    for i in (0..k).rev() {
+                        d_k = yxks_dim
                             .get_unchecked(i)
                             .mul_add(*p_k.get_unchecked(i), d_k)
                     }
-                }
-                d_k *= gamma_k_recip;
+                    d_k *= gamma_k_recip;
 
-                let fit_dim = unsafe { fit.get_unchecked_mut(dim) };
-                for i in 0..k {
-                    unsafe {
+                    let fit_dim = fit.get_unchecked_mut(dim);
+                    for i in 0..k {
                         // Subtracting here makes zero mathematical differrence:
                         // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
                         // but makes the fit more stable at higher dimensions when the polynomials are not exactly orthogonal.
@@ -566,8 +657,7 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
 
                         *fit_dim.get_unchecked_mut(i) += d_k_coeff;
                     }
-                }
-                unsafe {
+
                     let yxk_dim_k = yxks_dim.get_unchecked_mut(k);
                     // Subtracting here makes zero mathematical differrence:
                     // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
@@ -576,11 +666,11 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
 
                     *fit_dim.get_unchecked_mut(k) = d_k;
                 }
-            }
 
-            min_c_km1 = -gamma_km1_recip * gamma_k;
-            gamma_km1_recip = gamma_k_recip;
-            mem::swap::<&mut KP1Array<K, T>>(&mut p_k, &mut p_km1);
+                min_c_km1 = -gamma_km1_recip * gamma_k;
+                gamma_km1_recip = gamma_k_recip;
+                mem::swap::<&mut KP1Array<K, T>>(&mut p_k, &mut p_km1);
+            }
         }
 
         fit
@@ -606,6 +696,6 @@ impl<const K: usize, const D: usize, T: SimdAble> OnlinePolyfit<K, D, T> {
             mutable_data.update_at_zero(deriv, w, ys);
         }
 
-        Self::compute_fit_inner(&mutable_data.xks, &mut mutable_data.yxks)
+        Self::compute_fit_inner(&mutable_data.xlks, &mut mutable_data.yxks)
     }
 }

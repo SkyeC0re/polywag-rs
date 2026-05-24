@@ -109,28 +109,54 @@ impl<const K: usize, T> XlkSums<K, T> {
     }
 
     #[inline(always)]
-    pub const unsafe fn get_unchecked(&self, l: usize) -> &[T] {
+    pub const unsafe fn get_l_xks(&self, l: usize) -> &[T] {
+        let kml = K - l;
         unsafe {
             slice::from_raw_parts(
-                ((&self.0) as *const T).offset((l * l) as _),
-                ((K - l) << 1) + 1,
+                ((&self.0) as *const T).offset((kml * kml) as _),
+                (kml << 1) + 1,
             )
         }
     }
 
     #[inline(always)]
-    pub const unsafe fn get_unchecked_mut(&mut self, l: usize) -> &mut [T] {
+    pub const unsafe fn get_l_xk(&self, l: usize, k: usize) -> &T {
+        let kml = K - l;
+        unsafe { &*((&self.0) as *const T).offset(((kml * kml) + k) as _) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_xks_mut(&mut self, l: usize) -> &mut [T] {
+        let kml = K - l;
         unsafe {
             slice::from_raw_parts_mut(
-                ((&mut self.0) as *mut T).offset((l * l) as _),
-                ((K - l) << 1) + 1,
+                ((&mut self.0) as *mut T).offset((kml * kml) as _),
+                (kml << 1) + 1,
             )
         }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_xk_mut(&mut self, l: usize, k: usize) -> &mut T {
+        let kml = K - l;
+        unsafe { &mut *((&mut self.0) as *mut T).offset(((kml * kml) + k) as _) }
     }
 
     #[inline(always)]
     pub const fn as_raw_slice_mut(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut T, Self::LEN) }
+    }
+}
+
+impl<const K: usize, T: Debug> Debug for XlkSums<K, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+
+        for l in 0..=K {
+            list.entry(&unsafe { self.get_l_xks(l) });
+        }
+
+        list.finish()
     }
 }
 
