@@ -28,9 +28,10 @@ impl<const K: usize, T> KP1Array<K, T> {
     pub const LEN: usize = K + 1;
 }
 
-impl<const K: usize, T: Copy> KP1Array<K, T> {
-    pub const fn new(v: T) -> Self {
-        Self(v, [v; K])
+impl<const K: usize, T> KP1Array<K, T> {
+    #[inline]
+    pub const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 }
 
@@ -81,9 +82,10 @@ impl<const K: usize, T> DerefMut for TwoKP1Array<K, T> {
     }
 }
 
-impl<const K: usize, T: Copy> TwoKP1Array<K, T> {
-    pub const fn new(v: T) -> Self {
-        Self(v, [v; K], [v; K])
+impl<const K: usize, T> TwoKP1Array<K, T> {
+    #[inline]
+    pub const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 }
 
