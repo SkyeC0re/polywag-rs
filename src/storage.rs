@@ -15,27 +15,36 @@ use crate::simd::SimdAble;
 
 #[derive(Clone)]
 #[repr(C)]
-pub struct KP1Array<const K: usize, T>(T, [T; K]);
+pub struct KP1Array<T, const K: usize>(T, [T; K]);
 
-impl<const K: usize, T: Debug> Debug for KP1Array<K, T> {
+impl<const K: usize, T: Debug> Debug for KP1Array<T, K> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> core::fmt::Result {
         self.deref().fmt(f)
     }
 }
 
-impl<const K: usize, T> KP1Array<K, T> {
+impl<const K: usize, T> KP1Array<T, K> {
     pub const LEN: usize = K + 1;
-}
 
-impl<const K: usize, T> KP1Array<K, T> {
-    #[inline]
+    #[inline(always)]
     pub const fn zeroed() -> Self {
         unsafe { MaybeUninit::zeroed().assume_init() }
     }
-}
 
-impl<const K: usize, T> Deref for KP1Array<K, T> {
+    #[inline]
+    pub fn map_ref<U, F: FnMut(&T) -> U>(&self, mut f: F) -> KP1Array<U, K> {
+        let mut mapped = MaybeUninit::<KP1Array<U, K>>::uninit();
+
+        let base_ptr = mapped.as_mut_ptr().cast::<U>();
+        for (i, e) in self.iter().enumerate() {
+            unsafe { *base_ptr.add(i) = f(e) };
+        }
+
+        unsafe { mapped.assume_init() }
+    }
+}
+impl<const K: usize, T> Deref for KP1Array<T, K> {
     type Target = [T];
 
     #[inline(always)]
@@ -44,7 +53,7 @@ impl<const K: usize, T> Deref for KP1Array<K, T> {
     }
 }
 
-impl<const K: usize, T> DerefMut for KP1Array<K, T> {
+impl<const K: usize, T> DerefMut for KP1Array<T, K> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + 1) }
@@ -53,20 +62,37 @@ impl<const K: usize, T> DerefMut for KP1Array<K, T> {
 
 #[derive(Clone)]
 #[repr(C)]
-pub struct TwoKP1Array<const K: usize, T>(T, [T; K], [T; K]);
+pub struct TwoKP1Array<T, const K: usize>(T, [T; K], [T; K]);
 
-impl<const K: usize, T: Debug> Debug for TwoKP1Array<K, T> {
+impl<const K: usize, T> TwoKP1Array<T, K> {
+    pub const LEN: usize = K + K + 1;
+
+    #[inline(always)]
+    pub const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+
+    #[inline]
+    pub fn map_ref<U, F: FnMut(&T) -> U>(&self, mut f: F) -> TwoKP1Array<U, K> {
+        let mut mapped = MaybeUninit::<TwoKP1Array<U, K>>::uninit();
+
+        let base_ptr = mapped.as_mut_ptr().cast::<U>();
+        for (i, e) in self.iter().enumerate() {
+            unsafe { *base_ptr.add(i) = f(e) };
+        }
+
+        unsafe { mapped.assume_init() }
+    }
+}
+
+impl<T: Debug, const K: usize> Debug for TwoKP1Array<T, K> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> core::fmt::Result {
         self.deref().fmt(f)
     }
 }
 
-impl<const K: usize, T> TwoKP1Array<K, T> {
-    pub const LEN: usize = K + K + 1;
-}
-
-impl<const K: usize, T> Deref for TwoKP1Array<K, T> {
+impl<const K: usize, T> Deref for TwoKP1Array<T, K> {
     type Target = [T];
 
     #[inline(always)]
@@ -75,17 +101,10 @@ impl<const K: usize, T> Deref for TwoKP1Array<K, T> {
     }
 }
 
-impl<const K: usize, T> DerefMut for TwoKP1Array<K, T> {
+impl<const K: usize, T> DerefMut for TwoKP1Array<T, K> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + K + 1) }
-    }
-}
-
-impl<const K: usize, T> TwoKP1Array<K, T> {
-    #[inline]
-    pub const fn zeroed() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 }
 
@@ -100,9 +119,9 @@ impl<const K: usize, T> TwoKP1Array<K, T> {
 
 #[derive(Clone)]
 #[repr(C)]
-pub(crate) struct XlkSums<const K: usize, T>(T, [[T; K]; 2], [[T; K]; K]);
+pub(crate) struct XlkSums<T, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
 
-impl<const K: usize, T> XlkSums<K, T> {
+impl<T, const K: usize> XlkSums<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
 
     #[inline]
@@ -150,7 +169,7 @@ impl<const K: usize, T> XlkSums<K, T> {
     }
 }
 
-impl<const K: usize, T: Debug> Debug for XlkSums<K, T> {
+impl<const K: usize, T: Debug> Debug for XlkSums<T, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut list = f.debug_list();
 
