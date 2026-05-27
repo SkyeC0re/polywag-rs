@@ -1,7 +1,5 @@
 #![no_std]
 
-extern crate alloc;
-
 use crate::{
     simd::{SimdAble, SimdField},
     storage::KP1Array,
