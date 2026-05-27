@@ -48,24 +48,6 @@ impl<T: SimdAble, const K: usize> SPolynomial<T, K> {
             arr.assume_init()
         }
     }
-
-    // /// Computes the derivative of the polynomial in place.
-    // #[inline]
-    // pub fn deriv_in_place(&mut self) {
-    //     if self.coeffs.len() == 0 {
-    //         return;
-    //     }
-
-    //     for coeffs in self.coeffs.dims_mut() {
-    //         for i in 1..coeffs.len() {
-    //             unsafe {
-    //                 *coeffs.get_unchecked_mut(i - 1) = *coeffs.get_unchecked(i) * T::from_usize(i);
-    //             }
-    //         }
-    //     }
-
-    //     self.coeffs.set_len(self.coeffs.len() - 1);
-    // }
 }
 
 impl<T: SimdAble, const K: usize> Deref for SPolynomial<T, K> {
@@ -86,8 +68,13 @@ impl<T: SimdAble, const K: usize> DerefMut for SPolynomial<T, K> {
 
 #[inline]
 fn eval_slice_horner<SF: SimdField>(slice: &[SF::Element], x: SF) -> SF {
-    let mut result = SF::SF_ZERO;
-    for ci in slice.into_iter().rev().copied() {
+    let mut iter = slice.into_iter().rev().copied();
+    let mut result = if let Some(end_coeff) = iter.next() {
+        SF::splat(end_coeff)
+    } else {
+        return SF::SF_ZERO;
+    };
+    for ci in iter {
         result = SF::mul_add(result, x, SF::splat(ci));
     }
 
