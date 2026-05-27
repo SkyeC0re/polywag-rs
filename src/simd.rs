@@ -1,3 +1,4 @@
+use bytemuck::Zeroable;
 use cfg_if::cfg_if;
 use core::{
     fmt::Debug,
@@ -218,8 +219,7 @@ macro_rules! primitive_float_simd_field_impl {
 
 primitive_float_simd_field_impl![f64, f32];
 
-// Critically we require that the element be zeroable.
-pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
+pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug + Zeroable {
     type SimdT: SimdField<Element = Self>;
 
     fn is_finite(&self) -> bool;

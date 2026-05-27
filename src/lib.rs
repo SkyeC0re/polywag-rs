@@ -1,17 +1,15 @@
-// #![no_std]
+#![no_std]
 
 extern crate alloc;
 
 use crate::{
     simd::{SimdAble, SimdField},
-    storage::{Coeffs, KP1Array},
+    storage::KP1Array,
 };
-pub use bumpalo::{Bump, boxed::Box as BBox, collections::Vec as BVec};
 use core::{
-    marker::PhantomData,
-    mem::{self, MaybeUninit},
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
-    ptr::{self, NonNull},
+    ptr,
 };
 
 mod polyfit;

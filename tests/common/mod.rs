@@ -1,4 +1,5 @@
 use approx::AbsDiffEq;
+use bytemuck::Zeroable;
 use core::fmt::Debug;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use core::ops::{Deref, DerefMut};
@@ -178,6 +179,9 @@ impl SimdField for F256 {
         Self((&self.0).recip())
     }
 }
+
+// The implementation does in fact store zero as the zero bit pattern.
+unsafe impl Zeroable for F256 {}
 
 impl SimdAble for F256 {
     type SimdT = Self;
