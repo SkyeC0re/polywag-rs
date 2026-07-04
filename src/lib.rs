@@ -13,6 +13,7 @@ use core::{
 mod polyfit;
 mod storage;
 pub use polyfit::*;
+pub use storage::Fit;
 
 pub mod simd;
 

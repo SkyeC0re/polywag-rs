@@ -122,6 +122,7 @@ pub trait SimdField:
     + DivAssign
     + Neg<Output = Self>
     + PartialEq
+    + Zeroable
 {
     const SF_ZERO: Self;
     const SF_ONE: Self;
@@ -219,7 +220,7 @@ macro_rules! primitive_float_simd_field_impl {
 
 primitive_float_simd_field_impl![f64, f32];
 
-pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug + Zeroable {
+pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
     fn is_finite(&self) -> bool;

@@ -1,6 +1,8 @@
 use core::cmp::{max, min};
 use core::mem::{self, MaybeUninit};
+use core::ptr;
 
+use crate::storage::Fit;
 use crate::{
     SPolynomial,
     simd::SimdAble,
@@ -165,17 +167,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    #[inline]
-    pub fn compute_fit(&self) -> [SPolynomial<T, K>; D] {
-        Self::compute_fit_inner(&self.xlks, &mut self.yxks.clone(), self.max_l_insertion)
-    }
-
     fn compute_fit_inner(
         xlks: &XlkSums<T, K>,
         yxks: &mut [KP1Array<T, K>; D],
         max_l: usize,
-    ) -> [SPolynomial<T, K>; D] {
-        let mut fit = [(); D].map(|_| SPolynomial::<T, K>::new());
+    ) -> [Fit<T, K>; D] {
+        let mut fit = [(); D].map(|_| Fit::<T, K>::zeroed());
 
         let mut p_km1 = KP1Array::<T, K>::zeroed();
         let mut p_km1 = &mut p_km1;
@@ -197,7 +194,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 // but makes the fit more stable at higher dimensions when the polynomials are not exactly orthogonal.
                 *yx0_dim = T::SF_ZERO;
 
-                *fit.get_unchecked_mut(dim).get_unchecked_mut(0) = d_0;
+                *fit.get_unchecked_mut(dim).get_pk_i_mut(0, 0) = d_0;
             }
 
             let mut min_c_km1 = T::SF_ZERO;
@@ -207,9 +204,9 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             // [<x^0, x^k>, ... , <x^(k-1), x^k>]
             let mut inner_products_km1 = [T::SF_ZERO; K];
             for k in 1..=K {
-                // B_(k-1) = <xP_(k-1), P_(k-1)> / gamma_(k-1)
-                //     = <x^k + [x^(k-2)]P_(k-1) x^(k-2), P_(k-1)>
-                //     = <x^k, P_(k-1)> / gamma_(k-1) + [x^(k-2)]P_(k-1)
+                // B_(k-1)  = <xP_(k-1), P_(k-1)> / gamma_(k-1)
+                //          = <x^k + [x^(k-2)]P_(k-1) x^(k-2), P_(k-1)>
+                //          = <x^k, P_(k-1)> / gamma_(k-1) + [x^(k-2)]P_(k-1)
 
                 // <x^k, [x^0]P_(k-1) x^0> contains only the l=0 term. We abuse this to
                 // provide a direct initial value.
@@ -305,6 +302,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 for dim in 0..D {
                     let yxks_dim = yxks.get_unchecked_mut(dim);
                     let fit_dim = fit.get_unchecked_mut(dim);
+                    fit_dim.transfer_km1_k(k);
+                    let fit_dim = fit_dim.get_pk_mut(k);
 
                     {
                         // We subtract the accumulated <x^k, d_0 P_0> , ... , <x^k, d_(k-1) P_(k-1)> here as part of the
@@ -351,12 +350,17 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
     }
 
     #[inline]
+    pub fn compute_fit(&self) -> [Fit<T, K>; D] {
+        Self::compute_fit_inner(&self.xlks, &mut self.yxks.clone(), self.max_l_insertion)
+    }
+
+    #[inline]
     pub fn compute_fit_with_bias(
         &self,
         scale: T,
         rotate: T,
         bias: [(T, [T; D]); K],
-    ) -> [SPolynomial<T, K>; D] {
+    ) -> [Fit<T, K>; D] {
         let mut mutable_data = self.clone();
         if scale != T::SF_ONE {
             mutable_data.scale(scale);

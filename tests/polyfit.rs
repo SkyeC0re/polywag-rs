@@ -4,7 +4,7 @@ use approx::assert_abs_diff_eq;
 use core::ops::Add;
 use pastey::paste;
 use polywag::{
-    OnlinePolyfit,
+    Fit, OnlinePolyfit,
     simd::{SimdAble, SimdField},
 };
 
@@ -133,7 +133,7 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
         f256_regressor.update(0, w.into(), x.into(), [y.into()]);
     }
 
-    let [mut f256_poly] = f256_regressor.compute_fit();
+    let [mut f256_poly] = f256_regressor.compute_fit().each_ref().map(Fit::max_deg);
 
     let avg_err = scaling.into()
         * (0..=samples)
@@ -173,7 +173,7 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
         }
     }
 
-    let [poly] = regressor.compute_fit();
+    let [poly] = regressor.compute_fit().each_ref().map(Fit::max_deg);
 
     let poly_err = scaling.into()
         * (0..=samples)
@@ -218,7 +218,7 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
         );
     }
 
-    let poly = regressor.compute_fit();
+    let poly = regressor.compute_fit().each_ref().map(Fit::max_deg);
 
     let eps = test_eps();
     assert_abs_diff_eq!(poly[0][0], T::SF_ONE, epsilon = eps);
