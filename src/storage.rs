@@ -183,7 +183,12 @@ impl<T: SimdAble, const K: usize> PackedFitCoeffs<T, K> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct Fit<T: SimdAble, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
+pub struct Fit<T: SimdAble, const K: usize> {
+    _coeffs: T,
+    _coeffs1: [[T; K]; 2],
+    _coeffs2: [[T; K]; K],
+    errors: KP1Array<T, K>,
+}
 
 impl<T: SimdAble, const K: usize> Fit<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
@@ -195,26 +200,26 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk(&self, k: usize) -> &[T] {
-        unsafe { slice::from_raw_parts(((&self.0) as *const T).add(k * k), k + 1) }
+        unsafe { slice::from_raw_parts(((&self._coeffs) as *const T).add(k * k), k + 1) }
     }
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk_i(&self, k: usize, i: usize) -> &T {
-        unsafe { &*((&self.0) as *const T).add(k * k + i) }
+        unsafe { &*((&self._coeffs) as *const T).add(k * k + i) }
     }
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk_mut(&mut self, k: usize) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(((&mut self.0) as *mut T).add(k * k), k + 1) }
+        unsafe { slice::from_raw_parts_mut(((&mut self._coeffs) as *mut T).add(k * k), k + 1) }
     }
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk_i_mut(&mut self, k: usize, i: usize) -> &mut T {
-        unsafe { &mut *((&mut self.0) as *mut T).add(k * k + i) }
+        unsafe { &mut *((&mut self._coeffs) as *mut T).add(k * k + i) }
     }
 
     pub(crate) const unsafe fn transfer_km1_k(&mut self, k: usize) {
-        let start = (&mut self.0) as *mut T;
+        let start = (&mut self._coeffs) as *mut T;
         unsafe {
             ptr::copy_nonoverlapping(start.add((k - 1) * (k - 1)), start.add(k * k), k);
         }
@@ -222,7 +227,12 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
 
     #[inline(always)]
     pub(crate) const fn as_raw_slice_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut T, Self::LEN) }
+        unsafe { slice::from_raw_parts_mut((&mut self._coeffs) as *mut T, Self::LEN) }
+    }
+
+    #[inline(always)]
+    pub(crate) const fn errors_mut(&mut self) -> &mut KP1Array<T, K> {
+        &mut self.errors
     }
 
     #[inline]
@@ -236,9 +246,14 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
         poly
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn max_deg(&self) -> SPolynomial<T, K> {
         self.deg(K)
+    }
+
+    #[inline(always)]
+    pub fn error(&self, degree: usize) -> T {
+        unsafe { *self.errors.get_unchecked(degree.min(K)) }
     }
 }
 

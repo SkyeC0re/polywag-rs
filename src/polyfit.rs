@@ -15,6 +15,8 @@ pub struct OnlinePolyfit<T: SimdAble, const K: usize, const D: usize = 1> {
     factorials_1_up: [T; K],
     xlks: XlkSums<T, K>,
     yxks: [KP1Array<T, K>; D],
+    // Sum of all w_{l, i} * y_{l, i}^2 for error calculation.
+    yys: [T; D],
     max_l_insertion: usize,
 }
 
@@ -31,6 +33,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             }),
             xlks: XlkSums::zeroed(),
             yxks: unsafe { MaybeUninit::zeroed().assume_init() },
+            yys: unsafe { MaybeUninit::zeroed().assume_init() },
             max_l_insertion: 0,
         }
     }
@@ -106,6 +109,10 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 *yxk *= scale;
             }
         }
+
+        for yys in &mut self.yys {
+            *yys *= scale;
+        }
     }
 
     pub fn update_at_zero(&mut self, derivative: usize, w: T, ys: [T; D]) {
@@ -126,8 +133,10 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
 
         for (dim, y) in ys.into_iter().enumerate() {
             let yxk = unsafe { self.yxks.get_unchecked_mut(dim).get_unchecked_mut(l) };
-
             *yxk = T::mul_add(w_factorial, y, *yxk);
+
+            let yys = unsafe { self.yys.get_unchecked_mut(dim) };
+            *yys = w.mul_add(y * y, *yys);
         }
     }
 
@@ -164,15 +173,23 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 factorial = (factorial / T::from_usize(k - l)) * T::from_usize(k);
                 x_pow *= x;
             }
+
+            let yys = unsafe { self.yys.get_unchecked_mut(dim) };
+            *yys = w.mul_add(y * y, *yys);
         }
     }
 
     fn compute_fit_inner(
         xlks: &XlkSums<T, K>,
         yxks: &mut [KP1Array<T, K>; D],
+        yys: [T; D],
         max_l: usize,
     ) -> [Fit<T, K>; D] {
-        let mut fit = [(); D].map(|_| Fit::<T, K>::zeroed());
+        let mut fit = yys.map(|yys| {
+            let mut fit = Fit::<T, K>::zeroed();
+            unsafe { *fit.errors_mut().get_unchecked_mut(0) = yys }
+            fit
+        });
 
         let mut p_km1 = KP1Array::<T, K>::zeroed();
         let mut p_km1 = &mut p_km1;
@@ -351,7 +368,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
 
     #[inline]
     pub fn compute_fit(&self) -> [Fit<T, K>; D] {
-        Self::compute_fit_inner(&self.xlks, &mut self.yxks.clone(), self.max_l_insertion)
+        Self::compute_fit_inner(
+            &self.xlks,
+            &mut self.yxks.clone(),
+            self.yys,
+            self.max_l_insertion,
+        )
     }
 
     #[inline]
@@ -374,6 +396,6 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             mutable_data.update_at_zero(deriv, w, ys);
         }
 
-        Self::compute_fit_inner(&mutable_data.xlks, &mut mutable_data.yxks, K)
+        Self::compute_fit_inner(&mutable_data.xlks, &mut mutable_data.yxks, self.yys, K)
     }
 }
