@@ -2,7 +2,7 @@ use core::cmp::{max, min};
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
-use crate::storage::Fit;
+use crate::storage::{Fit, FitErrors, FitResult};
 use crate::{
     SPolynomial,
     simd::SimdAble,
@@ -14,8 +14,9 @@ use crate::{
 pub struct OnlinePolyfit<T: SimdAble, const K: usize, const D: usize = 1> {
     factorials_1_up: [T; K],
     xlks: XlkSums<T, K>,
+    // Y_1[x^<array index>]
     yxks: [KP1Array<T, K>; D],
-    // Sum of all w_{l, i} * y_{l, i}^2 for error calculation.
+    // Sum of all w_(l, i) y_(l, i)^2 for error calculation.
     yys: [T; D],
     max_l_insertion: usize,
 }
@@ -40,7 +41,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
 
     /// Update the regression state from `x'` to `x = x' + delta_x`, effectively shifting the domain of the
     /// regression to the left by `delta_x`.
-    pub fn rotate(&mut self, delta_x: T) {
+    pub fn shift(&mut self, delta_x: T) {
         let old_xlks = self.xlks.clone();
         let mut coeffs = TwoKP1Array::<T, K>::zeroed();
 
@@ -98,7 +99,6 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
     }
 
     /// Scale all sample weights by `scale`.
-    #[inline]
     pub fn scale(&mut self, scale: T) {
         for xlk in self.xlks.as_raw_slice_mut() {
             *xlk *= scale;
@@ -179,16 +179,32 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
+    /// Returns the sum of all sample weights:
+    /// $$\sum_{l=0}^{K}\sum_{i=1}^{N_l} w_{l, i}$$
+    pub fn weight(&self) -> T {
+        unsafe {
+            let mut sum = *self.xlks.get_l_xk(K, 0);
+            for l in (0..K).rev() {
+                sum += *self.xlks.get_l_xk(l, 0);
+            }
+
+            sum
+        }
+    }
+
     fn compute_fit_inner(
         xlks: &XlkSums<T, K>,
         yxks: &mut [KP1Array<T, K>; D],
         yys: [T; D],
         max_l: usize,
-    ) -> [Fit<T, K>; D] {
-        let mut fit = yys.map(|yys| {
-            let mut fit = Fit::<T, K>::zeroed();
-            unsafe { *fit.errors_mut().get_unchecked_mut(0) = yys }
-            fit
+    ) -> [FitResult<T, K>; D] {
+        let mut fit_res = yys.map(|yys| {
+            let mut errors = FitErrors::zeroed();
+            unsafe { *errors.errors_mut().get_unchecked_mut(0) = yys }
+            FitResult::<T, K> {
+                fit: Fit::zeroed(),
+                errors,
+            }
         });
 
         let mut p_km1 = KP1Array::<T, K>::zeroed();
@@ -204,14 +220,22 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             for dim in 0..D {
                 let yxks_dim = yxks.get_unchecked_mut(dim);
                 let yx0_dim = yxks_dim.get_unchecked_mut(0);
-                let d_0 = *yx0_dim * gamma_0_recip;
+                let fit_res_dim = fit_res.get_unchecked_mut(dim);
+                let gamma_d_0 = *yx0_dim;
 
                 // Subtracting from Y_1[x^k] here makes zero mathematical differrence since:
                 // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
                 // but makes the fit more stable at higher dimensions when the polynomials are not exactly orthogonal.
+                // Specifically, since we calculate <y(x), P_j> as Y_1[P_j], if, at every k we have for all k':
+                // Y'_1[x^k'] = <y(x) - d_0 P_0 ... - d_(k-1) P_(k-1), x^k'> = <y(x) - d_0 P_0 ... - d_min(k-1, k') P_min(k-1, k'), x^k'>
+                // then Y'_1[P_k] = Y_1[P_k].
                 *yx0_dim = T::SF_ZERO;
 
-                *fit.get_unchecked_mut(dim).get_pk_i_mut(0, 0) = d_0;
+                // Compute zeroeth degree error sum of all w_(l, i) [y_(l, i) - P_0^(l)(x_(l, i))]^2. (P_0^(l) here is shorthand for the
+                // l-th derivative of P_0).
+                *fit_res_dim.errors.errors_mut().get_unchecked_mut(0) +=
+                    gamma_0 - (gamma_d_0 + gamma_d_0);
+                *fit_res_dim.fit.get_pk_i_mut(0, 0) = gamma_d_0 * gamma_0_recip;
             }
 
             let mut min_c_km1 = T::SF_ZERO;
@@ -318,18 +342,18 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 let gamma_k_recip = gamma_k.recip();
                 for dim in 0..D {
                     let yxks_dim = yxks.get_unchecked_mut(dim);
-                    let fit_dim = fit.get_unchecked_mut(dim);
-                    fit_dim.transfer_km1_k(k);
-                    let fit_dim = fit_dim.get_pk_mut(k);
+                    let fit_res_dim = fit_res.get_unchecked_mut(dim);
+                    fit_res_dim.fit.transfer_km1_k(k);
+                    let fit_pk = fit_res_dim.fit.get_pk_mut(k);
 
                     {
                         // We subtract the accumulated <x^k, d_0 P_0> , ... , <x^k, d_(k-1) P_(k-1)> here as part of the
                         // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
-                        // strategy for Y_1[x^k].
+                        // strategy for Y'_1[x^k].
                         let yxks_dim_k = yxks_dim.get_unchecked_mut(k);
                         for k_prime in 0..k {
                             *yxks_dim_k = T::mul_add(
-                                -*fit_dim.get_unchecked(k_prime),
+                                -*fit_pk.get_unchecked(k_prime),
                                 *inner_products_km1.get_unchecked(k_prime),
                                 *yxks_dim_k,
                             );
@@ -342,19 +366,24 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                             .get_unchecked(i)
                             .mul_add(*p_k.get_unchecked(i), d_k)
                     }
-                    // Here d_k is actually still gamma_k * d_k, which we subtract to complete the the
+                    // Here d_k is actually still gamma_k * d_k = <x^k, d_k P_k>, which we subtract to complete the the
                     // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
-                    // strategy for Y_1[x^k].
+                    // strategy for Y'_1[x^k].
                     *yxks_dim.get_unchecked_mut(k) -= d_k;
+
+                    // Transfer and refine error sum of all w_(l, i) [y_(l, i) - P^(l)(x_(l, i))]^2.
+                    let mut err = fit_res_dim.errors.error(k - 1);
+                    err += gamma_k - (d_k + d_k);
+                    *fit_res_dim.errors.errors_mut().get_unchecked_mut(k) = err;
 
                     d_k *= gamma_k_recip;
 
                     for k_prime in 0..k {
-                        let fit_dim_k = fit_dim.get_unchecked_mut(k_prime);
+                        let fit_dim_k = fit_pk.get_unchecked_mut(k_prime);
                         *fit_dim_k = d_k.mul_add(*p_k.get_unchecked(k_prime), *fit_dim_k);
                     }
 
-                    *fit_dim.get_unchecked_mut(k) = d_k;
+                    *fit_pk.get_unchecked_mut(k) = d_k;
                 }
 
                 min_c_km1 = -gamma_km1_recip * gamma_k;
@@ -363,39 +392,16 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             }
         }
 
-        fit
+        fit_res
     }
 
     #[inline]
-    pub fn compute_fit(&self) -> [Fit<T, K>; D] {
+    pub fn compute_fit(&self) -> [FitResult<T, K>; D] {
         Self::compute_fit_inner(
             &self.xlks,
             &mut self.yxks.clone(),
             self.yys,
             self.max_l_insertion,
         )
-    }
-
-    #[inline]
-    pub fn compute_fit_with_bias(
-        &self,
-        scale: T,
-        rotate: T,
-        bias: [(T, [T; D]); K],
-    ) -> [Fit<T, K>; D] {
-        let mut mutable_data = self.clone();
-        if scale != T::SF_ONE {
-            mutable_data.scale(scale);
-        }
-
-        if rotate != T::SF_ZERO {
-            mutable_data.rotate(rotate);
-        }
-
-        for (deriv, (w, ys)) in bias.into_iter().enumerate() {
-            mutable_data.update_at_zero(deriv, w, ys);
-        }
-
-        Self::compute_fit_inner(&mutable_data.xlks, &mut mutable_data.yxks, self.yys, K)
     }
 }

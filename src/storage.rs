@@ -230,11 +230,6 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
         unsafe { slice::from_raw_parts_mut((&mut self._coeffs) as *mut T, Self::LEN) }
     }
 
-    #[inline(always)]
-    pub(crate) const fn errors_mut(&mut self) -> &mut KP1Array<T, K> {
-        &mut self.errors
-    }
-
     #[inline]
     pub fn deg(&self, degree: usize) -> SPolynomial<T, K> {
         let mut poly = SPolynomial::new();
@@ -250,11 +245,31 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
     pub fn max_deg(&self) -> SPolynomial<T, K> {
         self.deg(K)
     }
+}
+
+#[repr(transparent)]
+pub struct FitErrors<T: SimdAble, const K: usize>(KP1Array<T, K>);
+
+impl<T: SimdAble, const K: usize> FitErrors<T, K> {
+    #[inline(always)]
+    pub(crate) const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
 
     #[inline(always)]
     pub fn error(&self, degree: usize) -> T {
-        unsafe { *self.errors.get_unchecked(degree.min(K)) }
+        unsafe { *self.0.get_unchecked(degree.min(K)) }
     }
+
+    #[inline(always)]
+    pub(crate) const fn errors_mut(&mut self) -> &mut KP1Array<T, K> {
+        &mut self.0
+    }
+}
+
+pub struct FitResult<T: SimdAble, const K: usize> {
+    pub fit: Fit<T, K>,
+    pub errors: FitErrors<T, K>,
 }
 
 #[cfg(test)]
