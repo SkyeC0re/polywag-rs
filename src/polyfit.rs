@@ -231,11 +231,14 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 // then Y'_1[P_k] = Y_1[P_k].
                 *yx0_dim = T::SF_ZERO;
 
+                let d_0 = gamma_d_0 * gamma_0_recip;
+
                 // Compute zeroeth degree error sum of all w_(l, i) [y_(l, i) - P_0^(l)(x_(l, i))]^2. (P_0^(l) here is shorthand for the
                 // l-th derivative of P_0).
-                *fit_res_dim.errors.errors_mut().get_unchecked_mut(0) +=
-                    gamma_0 - (gamma_d_0 + gamma_d_0);
-                *fit_res_dim.fit.get_pk_i_mut(0, 0) = gamma_d_0 * gamma_0_recip;
+                let err = fit_res_dim.errors.errors_mut().get_unchecked_mut(0);
+                *err = d_0.mul_add(-gamma_d_0, *err);
+
+                *fit_res_dim.fit.get_pk_i_mut(0, 0) = d_0;
             }
 
             let mut min_c_km1 = T::SF_ZERO;
@@ -360,23 +363,23 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                         }
                     }
 
-                    let mut d_k = *yxks_dim.get_unchecked(k);
+                    let mut gamma_d_k = *yxks_dim.get_unchecked(k);
                     for i in (0..k).rev() {
-                        d_k = yxks_dim
+                        gamma_d_k = yxks_dim
                             .get_unchecked(i)
-                            .mul_add(*p_k.get_unchecked(i), d_k)
+                            .mul_add(*p_k.get_unchecked(i), gamma_d_k)
                     }
-                    // Here d_k is actually still gamma_k * d_k = <x^k, d_k P_k>, which we subtract to complete the the
+                    // Here gamma_k * d_k = <x^k, d_k P_k>, which we subtract to complete the the
                     // <y(x), P_j> = <y(x) - d_k P_k, P_j>    j != k
                     // strategy for Y'_1[x^k].
-                    *yxks_dim.get_unchecked_mut(k) -= d_k;
+                    *yxks_dim.get_unchecked_mut(k) -= gamma_d_k;
+
+                    let d_k = gamma_d_k * gamma_k_recip;
 
                     // Transfer and refine error sum of all w_(l, i) [y_(l, i) - P^(l)(x_(l, i))]^2.
-                    let mut err = fit_res_dim.errors.error(k - 1);
-                    err += gamma_k - (d_k + d_k);
-                    *fit_res_dim.errors.errors_mut().get_unchecked_mut(k) = err;
-
-                    d_k *= gamma_k_recip;
+                    let err = fit_res_dim.errors.error(k - 1);
+                    *fit_res_dim.errors.errors_mut().get_unchecked_mut(k) =
+                        d_k.mul_add(-gamma_d_k, err);
 
                     for k_prime in 0..k {
                         let fit_dim_k = fit_pk.get_unchecked_mut(k_prime);

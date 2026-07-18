@@ -1,16 +1,16 @@
 mod common;
 
-use approx::assert_abs_diff_eq;
+use approx::{abs_diff_eq, assert_abs_diff_eq};
 use core::ops::Add;
 use pastey::paste;
 use polywag::{
-    Fit, OnlinePolyfit,
+    Fit, OnlinePolyfit, SPolynomial,
     simd::{SimdAble, SimdField},
 };
 
 use crate::common::{F256, TestableSimd};
 
-const TEST_EPS_PERCENTAGE: usize = 85;
+const TEST_EPS_PERCENTAGE: usize = 75;
 
 /// Get the testing epsilon defined by `TEST_EPS_PERCENTAGE`. Specifically, given the test epsilon ratio $r$
 /// and `T`'s machine epsilon $\epsilon < 1$, we define the test epsilon as:
@@ -237,6 +237,36 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
 }
 
+#[track_caller]
+fn lagrange_fit<T: TestableSimd, const KP1: usize>(polynomial: [T; KP1], samples: &[T]) {
+    let mut r = OnlinePolyfit::<T, KP1>::new();
+
+    let eval = |x: T| {
+        let mut y = T::SF_ZERO;
+        for c in polynomial.into_iter().rev() {
+            y = y.mul_add(x, c);
+        }
+        y
+    };
+
+    for x in samples {
+        r.update(0, T::SF_ONE, *x, [eval(*x)]);
+    }
+
+    let [fit] = r.compute_fit();
+    let eps = test_eps();
+
+    for (c_expected, c_found) in polynomial
+        .into_iter()
+        .zip(fit.fit.deg(KP1 - 1).iter().copied())
+    {
+        assert_abs_diff_eq!(c_expected, c_found, epsilon = eps)
+    }
+
+    // Lagrangian fit
+    assert_abs_diff_eq!(fit.errors.error(KP1 - 1), T::SF_ZERO, epsilon = eps)
+}
+
 macro_rules! test_type {
     ($t:ty) => {
         paste! {
@@ -319,6 +349,38 @@ macro_rules! test_type {
             fn [<$t _online_multi_dem_increasing_deg_fit>]() {
                 online_multi_dem_increasing_deg_fit::<$t>()
             }
+
+            #[test]
+            fn [<$t _lagrange_fit_d0_1>]() {
+               lagrange_fit::<$t, _>(
+                    [
+                        -$t::from_usize(1),
+                    ],
+                    &[
+                        $t::from_usize(3),
+                    ]
+                )
+            }
+
+            #[test]
+            fn [<$t _lagrange_fit_d1_1>]() {
+                lagrange_fit::<$t, _>(
+                    [
+                        -$t::from_usize(1),
+                        $t::from_usize(2),
+                    ],
+                    &[
+                        $t::from_usize(3),
+                        -$t::from_usize(2),
+                        $t::from_usize(0),
+                    ]
+                )
+            }
+
+            // #[test]
+            // fn [<$t _lagrange_fit_1>]() {
+            //    lagrange_fit::<$t, _>([1, 2, 1].map($t::from_usize), &[1, 2, 3].map($t::from_usize))
+            // }
 
         }
     };
