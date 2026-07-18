@@ -192,6 +192,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
+    /// Returns the total squared error
+    /// which will be observed by the zero polynomial.
+    pub fn addressable_error(&self) -> [T; D] {
+        self.yys
+    }
+
     fn compute_fit_inner(
         xlks: &XlkSums<T, K>,
         yxks: &mut [KP1Array<T, K>; D],

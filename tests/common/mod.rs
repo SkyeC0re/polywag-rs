@@ -1,4 +1,4 @@
-use approx::AbsDiffEq;
+use approx::{AbsDiffEq, RelativeEq, relative_eq};
 use bytemuck::Zeroable;
 use core::fmt::Debug;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
@@ -8,8 +8,15 @@ use f256::f256;
 use polywag::simd::{SimdAble, SimdField};
 use std::fmt::Display;
 
-pub trait TestableSimd: SimdAble + AbsDiffEq<Epsilon = Self> + Into<F256> {}
-impl<T> TestableSimd for T where T: SimdAble + AbsDiffEq<Epsilon = Self> + Into<F256> {}
+pub trait TestableSimd:
+    SimdAble + AbsDiffEq<Epsilon = Self> + RelativeEq<Epsilon = Self> + Into<F256>
+{
+}
+
+impl<T> TestableSimd for T where
+    T: SimdAble + AbsDiffEq<Epsilon = Self> + RelativeEq<Epsilon = Self> + Into<F256>
+{
+}
 
 pub const TEST_EPS_PERCENTAGE: usize = 80;
 
@@ -22,6 +29,15 @@ pub fn test_eps<T: TestableSimd>() -> T {
     let ratio = T::from_usize(TEST_EPS_PERCENTAGE) / T::from_usize(100);
 
     T::exp(ratio * T::SF_EPS.ln())
+}
+
+pub fn eps_diff_eq<T: TestableSimd>(a: T, b: T, eps: T) -> bool {
+    relative_eq!(a, b, epsilon = eps, max_relative = eps)
+}
+
+#[track_caller]
+pub fn assert_eps_diff_eq<T: TestableSimd>(a: T, b: T, eps: T) {
+    assert!(eps_diff_eq(a, b, eps), "{:?} != {:?}", a, b);
 }
 
 #[macro_export]
