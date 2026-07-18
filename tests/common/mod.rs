@@ -4,13 +4,42 @@ use core::fmt::Debug;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use core::ops::{Deref, DerefMut};
 use core::{num::NonZeroUsize, slice};
+use f256::f256;
 use polywag::simd::{SimdAble, SimdField};
 use std::fmt::Display;
 
 pub trait TestableSimd: SimdAble + AbsDiffEq<Epsilon = Self> + Into<F256> {}
 impl<T> TestableSimd for T where T: SimdAble + AbsDiffEq<Epsilon = Self> + Into<F256> {}
 
-use f256::f256;
+pub const TEST_EPS_PERCENTAGE: usize = 80;
+
+/// Get the testing epsilon defined by `TEST_EPS_PERCENTAGE`. Specifically, given the test epsilon ratio $r$
+/// and `T`'s machine epsilon $\epsilon < 1$, we define the test epsilon as:
+/// $$
+///     \epsilon_t = e^{r \ln(\epsilon)}
+/// $$
+pub fn test_eps<T: TestableSimd>() -> T {
+    let ratio = T::from_usize(TEST_EPS_PERCENTAGE) / T::from_usize(100);
+
+    T::exp(ratio * T::SF_EPS.ln())
+}
+
+#[macro_export]
+macro_rules! test_all_types {
+    ($f:ident) => {
+        paste! {
+            #[test]
+            fn [<f64_ $f>]() {
+                $f::<f64>()
+            }
+
+            #[test]
+            fn [<f32_ $f>]() {
+                $f::<f32>()
+            }
+        }
+    };
+}
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 #[repr(transparent)]

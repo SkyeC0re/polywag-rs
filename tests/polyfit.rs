@@ -3,119 +3,11 @@ mod common;
 use approx::{abs_diff_eq, assert_abs_diff_eq};
 use core::ops::Add;
 use pastey::paste;
-use polywag::{
-    Fit, OnlinePolyfit, SPolynomial,
-    simd::{SimdAble, SimdField},
-};
+use polywag::{OnlinePolyfit, simd::SimdField};
 
-use crate::common::{F256, TestableSimd};
-
-const TEST_EPS_PERCENTAGE: usize = 75;
-
-/// Get the testing epsilon defined by `TEST_EPS_PERCENTAGE`. Specifically, given the test epsilon ratio $r$
-/// and `T`'s machine epsilon $\epsilon < 1$, we define the test epsilon as:
-/// $$
-///     \epsilon_t = e^{r \ln(\epsilon)}
-/// $$
-fn test_eps<T: TestableSimd>() -> T {
-    let ratio = T::from_usize(TEST_EPS_PERCENTAGE) / T::from_usize(100);
-
-    T::exp(ratio * T::SF_EPS.ln())
-}
-
-// #[track_caller]
-// fn empty_fit<T: TestableSimd>() {
-//     let mut poly = Polynomial::<3, T>::new();
-//     poly.polyfit_from_iter(PolyfitCfg::new_with_max_deg(100), [].into_iter());
-
-//     assert_eq!(poly.len(), 0)
-// }
-
-// /// Least squares regressions should reproduce polynomials up to the maximum fitting degree exactly.
-// #[track_caller]
-// fn multi_dem_increasing_deg_fit<T: TestableSimd>() {
-//     let mut poly = Polynomial::<3, T>::new();
-
-//     let half = T::SF_ONE / T::from_usize(2);
-//     let quarter = T::SF_ONE / T::from_usize(4);
-
-//     poly.polyfit_from_iter(
-//         PolyfitCfg::new_with_max_deg(2),
-//         (0..10).into_iter().map(|x| {
-//             let x = T::from_usize(x);
-//             (
-//                 T::SF_ONE,
-//                 x,
-//                 [
-//                     T::SF_ONE,
-//                     T::SF_ONE + half * x,
-//                     T::SF_ONE + half * x + quarter * x * x,
-//                 ],
-//             )
-//         }),
-//     );
-
-//     let eps = test_eps();
-//     assert_abs_diff_eq!(poly[0][0], T::SF_ONE, epsilon = eps);
-//     assert_abs_diff_eq!(poly[0][1], T::SF_ZERO, epsilon = eps);
-//     assert_abs_diff_eq!(poly[0][2], T::SF_ZERO, epsilon = eps);
-
-//     assert_abs_diff_eq!(poly[1][0], T::SF_ONE, epsilon = eps);
-//     assert_abs_diff_eq!(poly[1][1], half, epsilon = eps);
-//     assert_abs_diff_eq!(poly[1][2], T::SF_ZERO, epsilon = eps);
-
-//     assert_abs_diff_eq!(poly[2][0], T::SF_ONE, epsilon = eps);
-//     assert_abs_diff_eq!(poly[2][1], half, epsilon = eps);
-//     assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
-// }
-
-// /// Equal weights with duplicate `x` points with a symmetric offset should produce a least squares fit
-// /// exactly halfway in between.
-// #[track_caller]
-// fn split_linear_fit<T: TestableSimd>() {
-//     let mut poly = Polynomial::<1, T>::new();
-
-//     let iter = (0..10).into_iter().map(|x| T::from_usize(x));
-//     poly.polyfit_from_iter(
-//         PolyfitCfg::new_with_max_deg(1),
-//         iter.clone()
-//             .map(|x| (T::SF_ONE, x, [x + T::SF_ONE]))
-//             .chain(iter.map(|x| (T::SF_ONE, x, [x - T::SF_ONE]))),
-//     );
-
-//     let eps = test_eps();
-//     assert_abs_diff_eq!(poly[0][0], T::SF_ZERO, epsilon = eps);
-//     assert_abs_diff_eq!(poly[0][1], T::SF_ONE, epsilon = eps);
-// }
-
-// /// Degeneracies, such as duplicate `x` samples or zero weighted, should decrease the maximum fitted degree.
-// #[track_caller]
-// fn degeneracy_short_circuit<T: TestableSimd>() {
-//     let mut poly = Polynomial::<1, T>::new();
-//     poly.polyfit_from_iter(
-//         PolyfitCfg::new_with_max_deg(10),
-//         (0..20).into_iter().map(|x| {
-//             let (w, x) = match (x % 10 == 0, x % 2 == 0) {
-//                 (true, _) => (T::SF_ONE, T::from_usize(x)),
-//                 // Zero weight degeneracy
-//                 (false, true) => (T::SF_ZERO, T::from_usize(x)),
-//                 // Duplicate `x` degeneracy
-//                 (false, false) => (T::SF_ONE, T::from_usize(x - (x % 10))),
-//             };
-
-//             (w, x, [x + T::SF_ONE])
-//         }),
-//     );
-
-//     assert_eq!(poly[0].len(), 2);
-
-//     let eps = test_eps();
-//     assert_abs_diff_eq!(poly[0][0], T::SF_ONE, epsilon = eps);
-//     assert_abs_diff_eq!(poly[0][1], T::SF_ONE, epsilon = eps);
-// }
+use crate::common::{F256, TestableSimd, test_eps};
 
 /// Tests a function to ensure a minimal least squares fit is produced (up to our selected epsilon).
-#[track_caller]
 fn online_minimal_fit<T: TestableSimd, const K: usize>(
     w: fn(T) -> T,
     y: fn(T) -> T,
@@ -199,7 +91,6 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
 }
 
 /// Least squares regressions should reproduce polynomials up to the maximum fitting degree exactly.
-#[track_caller]
 fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     let half = T::SF_ONE / T::from_usize(2);
     let quarter = T::SF_ONE / T::from_usize(4);
@@ -237,8 +128,10 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
 }
 
-#[track_caller]
-fn lagrange_fit<T: TestableSimd, const KP1: usize>(polynomial: [T; KP1], samples: &[T]) {
+fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
+    polynomial: [T; KP1],
+    samples: &[T],
+) {
     let mut r = OnlinePolyfit::<T, KP1>::new();
 
     let eval = |x: T| {
@@ -256,135 +149,125 @@ fn lagrange_fit<T: TestableSimd, const KP1: usize>(polynomial: [T; KP1], samples
     let [fit] = r.compute_fit();
     let eps = test_eps();
 
-    for (c_expected, c_found) in polynomial
+    for (i, (c_expected, c_found)) in polynomial
         .into_iter()
         .zip(fit.fit.deg(KP1 - 1).iter().copied())
+        .enumerate()
     {
-        assert_abs_diff_eq!(c_expected, c_found, epsilon = eps)
+        assert!(
+            abs_diff_eq!(c_expected, c_found, epsilon = eps),
+            "Coefficient {} diverged: {:?} != {:?}",
+            i,
+            c_expected,
+            c_found
+        )
     }
 
-    // Lagrangian fit
-    assert_abs_diff_eq!(fit.errors.error(KP1 - 1), T::SF_ZERO, epsilon = eps)
+    assert_abs_diff_eq!(fit.errors.error(KP1 - 1), T::SF_ZERO, epsilon = eps);
 }
 
-macro_rules! test_type {
-    ($t:ty) => {
-        paste! {
-
-            // #[test]
-            // fn [<$t _empty_fit>]() {
-            //     empty_fit::<$t>();
-            // }
-
-            // #[test]
-            // fn [<$t _multi_dem_increasing_deg_fit>]() {
-            //     multi_dem_increasing_deg_fit::<$t>()
-            // }
-
-            // #[test]
-            // fn [<$t _split_linear_fit>]() {
-            //     split_linear_fit::<$t>()
-            // }
-
-            // #[test]
-            // fn [<$t _degeneracy_short_circuit>]() {
-            //     degeneracy_short_circuit::<$t>()
-            // }
-
-            #[test]
-            fn [<$t _optimal_fit_test_polynomial>]() {
-                let samples = 100;
-                online_minimal_fit::<$t, 1>(
-                    |_| $t::from_usize(1),
-                    |x| x*x + $t::from_usize(5) * x - $t::from_usize(1),
-                    samples,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_reciprocal>]() {
-                let samples = 100;
-                online_minimal_fit::<$t, 3>(
-                    |_| $t::from_usize(1),
-                    |x| $t::from_usize(1) / (x + $t::from_usize(1)),
-                    samples,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_exp>]() {
-                let samples = 100;
-                online_minimal_fit::<$t, 3>(
-                    |x| x,
-                    |x| $t::exp(x),
-                    samples,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_ln>]() {
-                let samples = 100;
-                online_minimal_fit::<$t, 5>(
-                    |x| x,
-                    |x| $t::ln(x + $t::SF_ONE),
-                    samples,
-                )
-            }
-
-            #[test]
-            fn [<$t _optimal_fit_test_discontinuity>]() {
-                let samples = 100;
-
-                online_minimal_fit::<$t, 4>(
-                    |_| $t::from_usize(1),
-                    |x| {
-                        let half = $t::SF_ONE / $t::from_usize(2);
-                        if x < half { $t::SF_ZERO} else {$t::SF_ONE}
-                    },
-                    samples,
-                )
-            }
-
-            #[test]
-            fn [<$t _online_multi_dem_increasing_deg_fit>]() {
-                online_multi_dem_increasing_deg_fit::<$t>()
-            }
-
-            #[test]
-            fn [<$t _lagrange_fit_d0_1>]() {
-               lagrange_fit::<$t, _>(
-                    [
-                        -$t::from_usize(1),
-                    ],
-                    &[
-                        $t::from_usize(3),
-                    ]
-                )
-            }
-
-            #[test]
-            fn [<$t _lagrange_fit_d1_1>]() {
-                lagrange_fit::<$t, _>(
-                    [
-                        -$t::from_usize(1),
-                        $t::from_usize(2),
-                    ],
-                    &[
-                        $t::from_usize(3),
-                        -$t::from_usize(2),
-                        $t::from_usize(0),
-                    ]
-                )
-            }
-
-            // #[test]
-            // fn [<$t _lagrange_fit_1>]() {
-            //    lagrange_fit::<$t, _>([1, 2, 1].map($t::from_usize), &[1, 2, 3].map($t::from_usize))
-            // }
-
-        }
-    };
+fn test_optimal_fit_test_polynomial<T: TestableSimd>() {
+    let samples = 100;
+    online_minimal_fit::<T, 1>(
+        |_| T::from_usize(1),
+        |x| x * x + T::from_usize(5) * x - T::from_usize(1),
+        samples,
+    )
 }
+test_all_types!(test_optimal_fit_test_polynomial);
 
-test_type!(f32);
-test_type!(f64);
+fn test_optimal_fit_test_reciprocal<T: TestableSimd>() {
+    let samples = 100;
+    online_minimal_fit::<T, 3>(
+        |_| T::from_usize(1),
+        |x| T::from_usize(1) / (x + T::from_usize(1)),
+        samples,
+    )
+}
+test_all_types!(test_optimal_fit_test_reciprocal);
+
+fn test_optimal_fit_test_exp<T: TestableSimd>() {
+    let samples = 100;
+    online_minimal_fit::<T, 3>(|x| x, |x| T::exp(x), samples)
+}
+test_all_types!(test_optimal_fit_test_exp);
+
+fn test_optimal_fit_test_ln<T: TestableSimd>() {
+    let samples = 100;
+    online_minimal_fit::<T, 5>(|x| x, |x| T::ln(x + T::SF_ONE), samples)
+}
+test_all_types!(test_optimal_fit_test_ln);
+
+fn test_optimal_fit_test_discontinuity<T: TestableSimd>() {
+    let samples = 100;
+
+    online_minimal_fit::<T, 4>(
+        |_| T::from_usize(1),
+        |x| {
+            let half = T::SF_ONE / T::from_usize(2);
+            if x < half { T::SF_ZERO } else { T::SF_ONE }
+        },
+        samples,
+    )
+}
+test_all_types!(test_optimal_fit_test_discontinuity);
+
+fn test_online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
+    online_multi_dem_increasing_deg_fit::<T>()
+}
+test_all_types!(test_online_multi_dem_increasing_deg_fit);
+
+fn test_saturated_zero_error_fit_d0_1<T: TestableSimd>() {
+    saturated_zero_error_fit::<T, _>([-T::from_usize(1)], &[T::from_usize(3)])
+}
+test_all_types!(test_saturated_zero_error_fit_d0_1);
+
+fn test_saturated_zero_error_fit_d0_2<T: TestableSimd>() {
+    saturated_zero_error_fit::<T, _>(
+        [T::from_usize(1)],
+        &[
+            -T::from_usize(3),
+            T::from_usize(5),
+            -T::from_usize(2),
+            T::from_usize(1),
+        ],
+    )
+}
+test_all_types!(test_saturated_zero_error_fit_d0_2);
+
+fn test_saturated_zero_error_fit_d1_1<T: TestableSimd>() {
+    saturated_zero_error_fit::<T, _>(
+        [-T::from_usize(1), T::from_usize(2)],
+        &[T::from_usize(3), -T::from_usize(2), T::from_usize(0)],
+    )
+}
+test_all_types!(test_saturated_zero_error_fit_d1_1);
+
+fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
+    let offset = -T::from_usize(50);
+    let scale = T::from_usize(1);
+    let sample_positions: Vec<T> = (0..100)
+        .into_iter()
+        .rev()
+        .map(|i| (T::from_usize(i) - offset) * scale)
+        .collect();
+
+    saturated_zero_error_fit::<T, _>([T::from_usize(1), -T::from_usize(1)], &sample_positions)
+}
+test_all_types!(test_saturated_zero_error_fit_d1_2);
+
+fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
+    let offset = -T::from_usize(50);
+    let scale = T::from_usize(1);
+    let sample_positions: Vec<T> = (0..100)
+        .into_iter()
+        .rev()
+        .map(|i| (T::from_usize(i) - offset) * scale)
+        .collect();
+
+    saturated_zero_error_fit::<T, _>(
+        [T::from_usize(1), T::from_usize(2), T::from_usize(3)],
+        &sample_positions,
+    )
+}
+test_all_types!(test_saturated_zero_error_fit_d2_1);
