@@ -171,7 +171,19 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
         eps,
     );
 
-    // assert_abs_diff_eq!(fit.errors.error(KP1 - 1), T::SF_ZERO, epsilon = eps);
+    for (i, (c_expected, c_found)) in polynomial
+        .into_iter()
+        .zip(fit.fit.deg(KP1 - 1).iter().copied())
+        .enumerate()
+    {
+        assert!(
+            abs_diff_eq!(c_expected, c_found, epsilon = eps),
+            "Coefficient {} diverged: {:?} != {:?}",
+            i,
+            c_expected,
+            c_found
+        )
+    }
 }
 
 fn test_optimal_fit_test_polynomial<T: TestableSimd>() {
