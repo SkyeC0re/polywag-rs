@@ -14,9 +14,9 @@ use crate::{
 pub struct OnlinePolyfit<T: SimdAble, const K: usize, const D: usize = 1> {
     factorials_1_up: [T; K],
     xlks: XlkSums<T, K>,
-    // Y_1[x^<array index>]
+    /// Y_1[x^<array index>]
     yxks: [KP1Array<T, K>; D],
-    // Sum of all w_(l, i) y_(l, i)^2 for error calculation.
+    /// Sum of all w_(l, i) y_(l, i)^2 for error calculation.
     yys: [T; D],
     max_l_insertion: usize,
 }

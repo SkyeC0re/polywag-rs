@@ -87,7 +87,7 @@ impl<T: SimdAble, const K: usize> DerefMut for TwoKP1Array<T, K> {
 /// <br>                    .
 /// <br>                    .
 /// <br>(1, 0)    , (1, 1)    , (1, 2)    , ... , (1, 2K - 2)
-/// <br>(0, 0)    , (0, 1)    , (1, 2)    , ... , (0, 2K - 2), (0, 2K - 1), (0, 2K)
+/// <br>(0, 0)    , (0, 1)    , (0, 2)    , ... , (0, 2K - 2), (0, 2K - 1), (0, 2K)
 #[derive(Clone)]
 #[repr(C)]
 pub(crate) struct XlkSums<T: SimdAble, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
