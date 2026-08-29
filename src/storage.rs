@@ -6,12 +6,16 @@ use core::ops::DerefMut;
 use core::ptr;
 use core::slice;
 
+use bytemuck::Zeroable;
+
 use crate::SPolynomial;
 use crate::simd::SimdAble;
 
 #[derive(Clone)]
 #[repr(C)]
-pub struct KP1Array<T: SimdAble, const K: usize>(T, [T; K]);
+pub struct KP1Array<T: Zeroable, const K: usize>(T, [T; K]);
+
+unsafe impl<T: Zeroable, const K: usize> Zeroable for KP1Array<T, K> {}
 
 impl<T: SimdAble, const K: usize> Debug for KP1Array<T, K> {
     #[inline]
@@ -20,7 +24,7 @@ impl<T: SimdAble, const K: usize> Debug for KP1Array<T, K> {
     }
 }
 
-impl<T: SimdAble, const K: usize> KP1Array<T, K> {
+impl<T: Zeroable, const K: usize> KP1Array<T, K> {
     pub const LEN: usize = K + 1;
 
     #[inline(always)]
@@ -28,7 +32,7 @@ impl<T: SimdAble, const K: usize> KP1Array<T, K> {
         unsafe { MaybeUninit::zeroed().assume_init() }
     }
 }
-impl<T: SimdAble, const K: usize> Deref for KP1Array<T, K> {
+impl<T: Zeroable, const K: usize> Deref for KP1Array<T, K> {
     type Target = [T];
 
     #[inline(always)]
@@ -37,7 +41,7 @@ impl<T: SimdAble, const K: usize> Deref for KP1Array<T, K> {
     }
 }
 
-impl<T: SimdAble, const K: usize> DerefMut for KP1Array<T, K> {
+impl<T: Zeroable, const K: usize> DerefMut for KP1Array<T, K> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + 1) }
@@ -187,7 +191,6 @@ pub struct Fit<T: SimdAble, const K: usize> {
     _coeffs: T,
     _coeffs1: [[T; K]; 2],
     _coeffs2: [[T; K]; K],
-    errors: KP1Array<T, K>,
 }
 
 impl<T: SimdAble, const K: usize> Fit<T, K> {
