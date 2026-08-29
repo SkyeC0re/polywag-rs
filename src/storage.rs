@@ -144,6 +144,69 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
     }
 }
 
+/// Stores all sums $\sum_{i=1}^{N_l} w_{l, i} y_{l, i} x_{l, i}^k$ in the following form (l, k):
+/// <br>(K, 0)
+/// <br>(K - 1, 0), (K - 1, 1)
+/// <br>                    .
+/// <br>                    .
+/// <br>                    .
+/// <br>(1, 0)    , (1, 1)    , (1, 2)    , ... , (1, K - 1)
+/// <br>(0, 0)    , (0, 1)    , (0, 2)    , ... , (0, K - 1), (0, K)
+/// Until `generic_const_expressions` are stabilized, this will use a `k^2 + 2` memory
+/// as opposed to the expected `(k+1)(k+2)/2`.
+#[derive(Clone)]
+#[repr(C)]
+pub(crate) struct YlkSums<T: SimdAble, const K: usize>(T, T, [[T; K]; K]);
+
+impl<T: SimdAble, const K: usize> YlkSums<T, K> {
+    #[inline]
+    pub const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+
+    #[inline(always)]
+    const fn yxks_start(l: usize) -> usize {
+        let kml = K - l;
+        (kml * (kml + 1)) >> 1
+    }
+
+    #[inline(always)]
+    const fn yxks_len(l: usize) -> usize {
+        let kml = K - l;
+        kml + 1
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_yxks(&self, l: usize) -> &[T] {
+        unsafe {
+            slice::from_raw_parts(
+                ((&self.0) as *const T).add(Self::yxks_start(l)),
+                Self::yxks_len(l),
+            )
+        }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_yxk(&self, l: usize, k: usize) -> &T {
+        unsafe { &*((&self.0) as *const T).add(Self::yxks_start(l) + k) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_yxks_mut(&mut self, l: usize) -> &mut [T] {
+        unsafe {
+            slice::from_raw_parts_mut(
+                ((&mut self.0) as *mut T).add(Self::yxks_start(l)),
+                Self::yxks_len(l),
+            )
+        }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_yxk_mut(&mut self, l: usize, k: usize) -> &mut T {
+        unsafe { &mut *((&mut self.0) as *mut T).add(Self::yxks_start(l) + k) }
+    }
+}
+
 #[repr(C)]
 pub(crate) struct PackedFitCoeffs<T: SimdAble, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
 
@@ -185,7 +248,7 @@ impl<T: SimdAble, const K: usize> PackedFitCoeffs<T, K> {
 #[derive(Debug, Clone)]
 pub struct Fit<T: SimdAble, const K: usize> {
     _coeffs: T,
-    _coeffs1: [[T; K]; 2],
+    _coeffs1: T,
     _coeffs2: [[T; K]; K],
     errors: KP1Array<T, K>,
 }

@@ -246,4 +246,9 @@ impl SimdAble for F256 {
         #[cfg(target_pointer_width = "64")]
         return Self(f256::from(v as u64));
     }
+
+    #[inline(always)]
+    fn powf(self, n: Self) -> Self {
+        Self(self.0.powf(&n.0))
+    }
 }

@@ -226,6 +226,8 @@ pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     fn is_finite(&self) -> bool;
 
     fn from_usize(v: usize) -> Self;
+
+    fn powf(self, n: Self) -> Self;
 }
 
 macro_rules! wide_simd_able_impl {
@@ -242,6 +244,11 @@ macro_rules! wide_simd_able_impl {
             #[inline(always)]
             fn from_usize(v: usize) -> Self {
                 v as _
+            }
+
+            #[inline(always)]
+            fn powf(self, n: Self) -> Self {
+                self.powf(n)
             }
         }
         )*
