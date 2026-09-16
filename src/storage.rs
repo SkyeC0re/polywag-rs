@@ -1,4 +1,5 @@
 extern crate alloc;
+use core::ffi::c_void;
 use core::fmt::Debug;
 use core::mem::MaybeUninit;
 use core::ops::Deref;
@@ -148,11 +149,26 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
     }
 }
 
+/// Stores all sums $\sum_{i=1}^{N_l} w_{l, i} y_{l, i} x_{l, i}^k$ in the following form (l, k):
+/// <br>(K, 0)
+/// <br>(K - 1, 0), (K - 1, 1)
+/// <br>                    .
+/// <br>                    .
+/// <br>                    .
+/// <br>(1, 0)    , (1, 1)    , (1, 2)    , ... , (1, K - 1)
+/// <br>(0, 0)    , (0, 1)    , (0, 2)    , ... , (0, K - 1), (0, K)
 #[repr(C)]
-pub(crate) struct PackedFitCoeffs<T: SimdAble, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
+pub(crate) struct YxlkSums<T: SimdAble + Copy, const K: usize>(
+    T::Half,
+    T::Half,
+    [[T::Half; 3]; K],
+    [[T::Half; K]; K],
+    // ZST for alignment
+    [T; 0],
+);
 
-impl<T: SimdAble, const K: usize> PackedFitCoeffs<T, K> {
-    const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
+impl<T: SimdAble, const K: usize> YxlkSums<T, K> {
+    const LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
 
     #[inline]
     pub const fn zeroed() -> Self {
@@ -160,28 +176,38 @@ impl<T: SimdAble, const K: usize> PackedFitCoeffs<T, K> {
     }
 
     #[inline(always)]
-    pub const unsafe fn get_pk(&self, k: usize) -> &[T] {
-        unsafe { slice::from_raw_parts(((&self.0) as *const T).add(k * k), k + 1) }
+    pub const unsafe fn get_l_yxks(&self, l: usize) -> &[T] {
+        unsafe {
+            slice::from_raw_parts(
+                ((&self.0) as *const _ as *const T).add((l * (l + 1)) >> 1),
+                l + 1,
+            )
+        }
     }
 
     #[inline(always)]
-    pub const unsafe fn get_pk_i(&self, k: usize, i: usize) -> &T {
-        unsafe { &*((&self.0) as *const T).add(k * k + i) }
+    pub const unsafe fn get_l_yxk(&self, l: usize, i: usize) -> &T {
+        unsafe { &*((&self.0) as *const _ as *const T).add(((l * (l + 1)) >> 1) + i) }
     }
 
     #[inline(always)]
-    pub const unsafe fn get_pk_mut(&mut self, k: usize) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(((&mut self.0) as *mut T).add(k * k), k + 1) }
+    pub const unsafe fn get_l_yxks_mut(&mut self, l: usize) -> &mut [T] {
+        unsafe {
+            slice::from_raw_parts_mut(
+                ((&mut self.0) as *mut _ as *mut T).add((l * (l + 1)) >> 1),
+                l + 1,
+            )
+        }
     }
 
     #[inline(always)]
-    pub const unsafe fn get_pk_i_mut(&mut self, k: usize, i: usize) -> &mut T {
-        unsafe { &mut *((&mut self.0) as *mut T).add(k * k + i) }
+    pub const unsafe fn get_l_yxk_mut(&mut self, l: usize, i: usize) -> &mut T {
+        unsafe { &mut *((&mut self.0) as *mut _ as *mut T).add(((l * (l + 1)) >> 1) + i) }
     }
 
     #[inline(always)]
     pub const fn as_raw_slice_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut T, Self::LEN) }
+        unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut _ as *mut T, Self::LEN) }
     }
 }
 

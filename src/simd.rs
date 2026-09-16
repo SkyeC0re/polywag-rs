@@ -6,6 +6,7 @@ use core::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     ptr, slice,
 };
+use wide::AlignTo;
 
 use pastey::paste;
 
@@ -223,16 +224,26 @@ primitive_float_simd_field_impl![f64, f32];
 pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
+    /// A `u8` array type which has at least half the size of `Self``.
+    type Half;
+
+    const _VALIDATE: () = const {
+        assert!(size_of::<Self::Half>().checked_div(0).unwrap() < 0);
+        ()
+    };
+
     fn is_finite(&self) -> bool;
 
     fn from_usize(v: usize) -> Self;
 }
 
 macro_rules! wide_simd_able_impl {
-     ( $( $elm:ty : $simdt:ty),* ) => {
+     ( $( $elm:ty : $simdt:ty : $half_len:expr),* ) => {
         $(
         impl SimdAble for $elm {
             type SimdT = $simdt;
+
+            type Half = [u8; $half_len];
 
             #[inline(always)]
             fn is_finite(&self) -> bool {
@@ -249,8 +260,8 @@ macro_rules! wide_simd_able_impl {
 }
 
 wide_simd_able_impl![
-    f32 : MaxSimdf32,
-    f64 : MaxSimdf64
+    f32 : MaxSimdf32 : 2,
+    f64 : MaxSimdf64: 4
 ];
 
 #[inline(always)]

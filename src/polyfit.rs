@@ -2,6 +2,8 @@ use core::cmp::{max, min};
 use core::mem::{self, MaybeUninit};
 use core::ptr;
 
+use bytemuck::Zeroable;
+
 use crate::storage::{Fit, FitErrors, FitResult};
 use crate::{
     SPolynomial,
@@ -203,6 +205,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         yxks: &mut [KP1Array<T, K>; D],
         yys: [T; D],
         max_l: usize,
+        bias: KP1Array<(T, [T; D]), K>,
     ) -> [FitResult<T, K>; D] {
         let mut fit_res = yys.map(|yys| {
             let mut errors = FitErrors::zeroed();
@@ -219,7 +222,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
 
         unsafe {
-            let gamma_0 = *xlks.get_l_xk(0, 0);
+            let w_b = bias.get_unchecked(0).0;
+            let gamma_0 = (*xlks.get_l_xk(0, 0) + w_b).max(w_b);
             let gamma_0_recip = gamma_0.recip();
             // <x^k, x^{k_prime}>
             let mut inner_products =
@@ -235,7 +239,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                         let kk_prime = k + k_prime;
                         let mut xkxk_prime = *xlks.get_l_xk(0, kk_prime);
 
-                        for l in 1..(k_prime + 1) {
+                        for l in 1..(k_prime.min(max_l) + 1) {
                             mul *= left * right;
                             left -= T::SF_ONE;
                             right -= T::SF_ONE;
@@ -290,8 +294,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 let upper_coeffs = &mut fit_res.get_unchecked_mut(0).fit;
                 let inner_products = inner_products.get_unchecked(0);
                 for k_larger in 1..(K + 1) {
-                    *upper_coeffs.get_pk_i_mut(k_larger, 0) =
-                        -*inner_products.get_unchecked(k_larger) * gamma_0_recip;
+                    let xkp0 = *inner_products.get_unchecked(k_larger);
+                    *upper_coeffs.get_pk_i_mut(k_larger, 0) = -xkp0 * gamma_0_recip;
                 }
             }
 
@@ -299,6 +303,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             let mut xkpk = KP1Array::<T, K>::zeroed();
             // P_k - x^k (P_k without the x^k term).
             let mut p_k = KP1Array::<T, K>::zeroed();
+            // k!
+            let mut bias_factor = T::SF_ONE;
             for k in 1..=K {
                 ptr::copy_nonoverlapping(
                     fit_res.get_unchecked(0).fit.get_pk(k).as_ptr(),
@@ -306,7 +312,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     k,
                 );
 
-                for k_left in 0..=K {
+                for k_left in (0..=K).rev() {
                     let inner_products = inner_products.get_unchecked(k_left);
                     let xkpk = xkpk.get_unchecked_mut(k_left);
                     *xkpk = *inner_products.get_unchecked(k);
@@ -317,12 +323,17 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     }
                 }
 
-                let gamma_k = *xkpk.get_unchecked(k);
-                // for k_prime in (0..k).rev() {
-                //     gamma_k = xkpk
-                //         .get_unchecked(k_prime)
-                //         .mul_add(*p_k.get_unchecked(k_prime), gamma_k)
-                // }
+                let mut gamma_k = *xkpk.get_unchecked(k);
+                for k_prime in (0..k).rev() {
+                    gamma_k = p_k
+                        .get_unchecked(k_prime)
+                        .mul_add(*xkpk.get_unchecked(k_prime), gamma_k);
+                }
+
+                bias_factor *= T::from_usize(k);
+                let w_b = bias.get_unchecked(k).0;
+                gamma_k = (bias_factor * bias_factor).mul_add(w_b, gamma_k).max(w_b);
+
                 let gamma_k_recip = gamma_k.recip();
 
                 for dim in (0..D).rev() {
@@ -338,6 +349,9 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                             .mul_add(*p_k.get_unchecked(i), gamma_d_k)
                     }
                     let d_k = gamma_d_k * gamma_k_recip;
+
+                    // Subtract the resulting fit from Y_1(x^j) for all j to gradually decrease their
+                    // overall values as k becomes larger.
                     for k_upper in 0..=K {
                         let yxks_dim_k = yxks_dim.get_unchecked_mut(k_upper);
                         *yxks_dim_k = d_k.mul_add(-*xkpk.get_unchecked(k_upper), *yxks_dim_k);
@@ -360,21 +374,20 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     // MGS Procedure for larger k's. We abuse the storage of the zeroeth-dimension's
                     // polynomials to accomplish this.
                     let upper_coeffs = &mut fit_res.get_unchecked_mut(0).fit;
-                    for k_larger in (k + 1)..(K + 1) {
-                        let pk_larger = upper_coeffs.get_pk_mut(k_larger);
-                        let mut c = *xkpk.get_unchecked(k_larger);
+                    for k_upper in (k + 1)..(K + 1) {
+                        let pk_upper = upper_coeffs.get_pk_mut(k_upper);
+                        let mut c = *xkpk.get_unchecked(k_upper);
                         for k_prime in 0..k {
-                            c = pk_larger
+                            c = pk_upper
                                 .get_unchecked(k_prime)
                                 .mul_add(*xkpk.get_unchecked(k_prime), c);
                         }
-                        c *= -gamma_k_recip;
-
-                        *pk_larger.get_unchecked_mut(k) += c;
+                        c = -c * gamma_k_recip;
+                        *pk_upper.get_unchecked_mut(k) += c;
                         for k_prime in 0..=k {
-                            let pk_larger_kp = pk_larger.get_unchecked_mut(k_prime);
+                            let pk_upper_kp = pk_upper.get_unchecked_mut(k_prime);
 
-                            *pk_larger_kp = p_k.get_unchecked(k_prime).mul_add(c, *pk_larger_kp);
+                            *pk_upper_kp = p_k.get_unchecked(k_prime).mul_add(c, *pk_upper_kp);
                         }
                     }
                 }
@@ -391,6 +404,18 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             &mut self.yxks.clone(),
             self.yys,
             self.max_l_insertion,
+            Zeroable::zeroed(),
+        )
+    }
+
+    #[inline]
+    pub fn compute_fit_with_bias(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
+        Self::compute_fit_inner(
+            &self.xlks,
+            &mut self.yxks.clone(),
+            self.yys,
+            self.max_l_insertion,
+            bias,
         )
     }
 }

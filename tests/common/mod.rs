@@ -231,6 +231,8 @@ unsafe impl Zeroable for F256 {}
 impl SimdAble for F256 {
     type SimdT = Self;
 
+    type Half = [u8; 1];
+
     #[inline(always)]
     fn is_finite(&self) -> bool {
         self.0.is_finite()
