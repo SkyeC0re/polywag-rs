@@ -258,11 +258,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 }
             }
 
+            let bias_0 = bias.get_unchecked(0);
             for dim in (0..D).rev() {
                 let yxks_dim = yxks.get_unchecked_mut(dim);
                 let yx0_dim = yxks_dim.get_unchecked_mut(0);
                 let fit_res_dim = fit_res.get_unchecked_mut(dim);
-                let gamma_d_0 = *yx0_dim;
+                let gamma_d_0 = bias_0.0.mul_add(*bias_0.1.get_unchecked(dim), *yx0_dim);
                 let d_0 = gamma_d_0 * gamma_0_recip;
 
                 // Subtracting from Y_1[x^k] here makes zero mathematical differrence since:
@@ -331,7 +332,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                 }
 
                 bias_factor *= T::from_usize(k);
-                let w_b = bias.get_unchecked(k).0;
+                let bias_k = bias.get_unchecked(k);
+                let w_b = bias_k.0;
                 gamma_k = (bias_factor * bias_factor).mul_add(w_b, gamma_k).max(w_b);
 
                 let gamma_k_recip = gamma_k.recip();
@@ -342,7 +344,10 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     fit_res_dim.fit.transfer_km1_k(k);
                     let fit_pk = fit_res_dim.fit.get_pk_mut(k);
 
-                    let mut gamma_d_k = *yxks_dim.get_unchecked(k);
+                    let yxk_dim = yxks_dim.get_unchecked_mut(k);
+                    *yxk_dim = w_b.mul_add(bias_factor * *bias_k.1.get_unchecked(dim), *yxk_dim);
+
+                    let mut gamma_d_k = *yxk_dim;
                     for i in (0..k).rev() {
                         gamma_d_k = yxks_dim
                             .get_unchecked(i)

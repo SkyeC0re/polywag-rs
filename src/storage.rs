@@ -14,7 +14,7 @@ use crate::simd::SimdAble;
 
 #[derive(Clone)]
 #[repr(C)]
-pub struct KP1Array<T: Zeroable, const K: usize>(T, [T; K]);
+pub struct KP1Array<T, const K: usize>(T, [T; K]);
 
 unsafe impl<T: Zeroable, const K: usize> Zeroable for KP1Array<T, K> {}
 
@@ -25,13 +25,28 @@ impl<T: SimdAble, const K: usize> Debug for KP1Array<T, K> {
     }
 }
 
-impl<T: Zeroable, const K: usize> KP1Array<T, K> {
+impl<T, const K: usize> KP1Array<T, K> {
     pub const LEN: usize = K + 1;
 
     #[inline(always)]
-    pub const fn zeroed() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
+    pub const fn new(first: T, rest: [T; K]) -> Self {
+        Self(first, rest)
     }
+
+    #[inline]
+    pub fn map<O, F: FnMut(T) -> O>(self, mut f: F) -> KP1Array<O, K> {
+        KP1Array::new(f(self.0), self.1.map(f))
+    }
+}
+
+#[macro_export]
+macro_rules! kp1_arr {
+    [$first:expr $(,$rest:expr)* $(,)?] => {
+        KP1Array::new(
+            $first,
+            [$($rest,)*]
+        )
+    };
 }
 impl<T: Zeroable, const K: usize> Deref for KP1Array<T, K> {
     type Target = [T];

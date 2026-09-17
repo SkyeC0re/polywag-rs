@@ -1,9 +1,7 @@
 #![no_std]
 
-use crate::{
-    simd::{SimdAble, SimdField},
-    storage::KP1Array,
-};
+use crate::simd::{SimdAble, SimdField};
+use bytemuck::zeroed;
 use core::{
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
@@ -13,7 +11,7 @@ use core::{
 mod polyfit;
 mod storage;
 pub use polyfit::*;
-pub use storage::Fit;
+pub use storage::{Fit, KP1Array};
 
 pub mod simd;
 
@@ -25,7 +23,7 @@ impl<T: SimdAble, const K: usize> SPolynomial<T, K> {
     /// Create a new zero polynomial.
     #[inline(always)]
     pub const fn new() -> Self {
-        Self(KP1Array::zeroed())
+        Self(zeroed())
     }
 
     #[inline]

@@ -3,7 +3,7 @@ mod common;
 use approx::{abs_diff_eq, assert_abs_diff_eq};
 use core::ops::Add;
 use pastey::paste;
-use polywag::{OnlinePolyfit, simd::SimdField};
+use polywag::{KP1Array, OnlinePolyfit, kp1_arr, simd::SimdField};
 
 use crate::common::{F256, TestableSimd, assert_eps_diff_eq, eps_diff_eq, test_eps};
 
@@ -149,19 +149,6 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     let [fit] = r.compute_fit();
     let eps = test_eps::<T>();
 
-    let p = fit.fit.deg(KP1 - 1);
-    // for &x in samples {
-    //     let expected = eval(x);
-    //     let found = p.evaluate_array([x])[0];
-    //     assert!(
-    //         eps_diff_eq(found, expected, eps),
-    //         "P({:?}) diverged: {:?} != {:?}",
-    //         x,
-    //         found,
-    //         expected
-    //     );
-    // }
-
     // Instead of testing that the total error is exactly zero, we instead test
     // that the error associated with the fit is zero relative to the total addressable error.
     let [addressable_error] = r.addressable_error();
@@ -178,11 +165,50 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     {
         assert!(
             abs_diff_eq!(c_expected, c_found, epsilon = eps),
-            "Coefficient {} diverged: PExp: {:?} != PFit: {:?}",
+            "Coefficient {} diverged: P_exp: {:?} != P_fit: {:?}",
             i,
             polynomial,
             &fit.fit.deg(KP1 - 1)[0..KP1]
         )
+    }
+
+    let p = fit.fit.deg(KP1 - 1);
+    for &x in samples {
+        let expected = eval(x);
+        let found = p.evaluate_array([x])[0];
+        assert!(
+            eps_diff_eq(found, expected, eps),
+            "P({:?}) diverged: {:?} != {:?}",
+            x,
+            found,
+            expected
+        );
+    }
+}
+
+fn bias_fit<T: TestableSimd, const K: usize, const D: usize>(bias: KP1Array<(T, [T; D]), K>) {
+    let r = OnlinePolyfit::<T, K, D>::new();
+
+    let fit = r.compute_fit_with_bias(bias.clone());
+    let eps = test_eps::<T>();
+    for (dim, fit_dim) in fit.into_iter().enumerate() {
+        let poly_found = fit_dim.fit.max_deg();
+        let poly_bias = bias.clone().map(|b| b.1[dim]);
+        for (i, (c_expected, c_found)) in poly_bias
+            .iter()
+            .copied()
+            .zip(poly_found.iter().copied())
+            .enumerate()
+        {
+            assert!(
+                abs_diff_eq!(c_expected, c_found, epsilon = eps),
+                "Dim {}: Coefficient {} diverged: P_bias: {:?} != P_fit: {:?}",
+                dim,
+                i,
+                &*poly_bias,
+                &*poly_found,
+            )
+        }
     }
 }
 
@@ -277,8 +303,8 @@ fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
 test_all_types!(test_saturated_zero_error_fit_d1_2);
 
 fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
-    let offset = -T::from_usize(50);
-    let scale = T::from_usize(1).recip();
+    let offset = T::from_usize(5);
+    let scale = T::from_usize(10).recip();
     let sample_positions: Vec<T> = (0..100)
         .into_iter()
         .rev()
@@ -296,3 +322,16 @@ fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
     )
 }
 test_all_types!(test_saturated_zero_error_fit_d2_1);
+
+fn test_bias_only_d0_1<T: TestableSimd>() {
+    bias_fit(kp1_arr![(T::from_usize(1), [T::from_usize(2)])]);
+}
+test_all_types!(test_bias_only_d0_1);
+
+fn test_bias_only_d2_1<T: TestableSimd>() {
+    bias_fit(kp1_arr![
+        (T::from_usize(1), [T::from_usize(2), -T::from_usize(7)]),
+        (T::from_usize(2), [T::from_usize(1), T::from_usize(13)])
+    ]);
+}
+test_all_types!(test_bias_only_d2_1);
