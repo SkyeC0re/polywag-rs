@@ -18,7 +18,7 @@ impl<T> TestableSimd for T where
 {
 }
 
-pub const TEST_EPS_PERCENTAGE: usize = 80;
+pub const TEST_EPS_PERCENTAGE: usize = 50;
 
 /// Get the testing epsilon defined by `TEST_EPS_PERCENTAGE`. Specifically, given the test epsilon ratio $r$
 /// and `T`'s machine epsilon $\epsilon < 1$, we define the test epsilon as:

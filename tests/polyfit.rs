@@ -130,7 +130,7 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
 
 fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     polynomial: [T; KP1],
-    samples: &[T],
+    samples: &[(T, T)],
 ) {
     let mut r = OnlinePolyfit::<T, KP1>::new();
 
@@ -142,8 +142,8 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
         y
     };
 
-    for x in samples {
-        r.update(0, T::SF_ONE, *x, [eval(*x)]);
+    for &(w, x) in samples {
+        r.update(0, w, x, [eval(x)]);
     }
 
     let [fit] = r.compute_fit();
@@ -173,7 +173,7 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     }
 
     let p = fit.fit.deg(KP1 - 1);
-    for &x in samples {
+    for &(_, x) in samples {
         let expected = eval(x);
         let found = p.evaluate_array([x])[0];
         assert!(
@@ -264,7 +264,7 @@ fn test_online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
 test_all_types!(test_online_multi_dem_increasing_deg_fit);
 
 fn test_saturated_zero_error_fit_d0_1<T: TestableSimd>() {
-    saturated_zero_error_fit::<T, _>([-T::from_usize(1)], &[T::from_usize(3)])
+    saturated_zero_error_fit::<T, _>([-T::from_usize(1)], &[(T::from_usize(1), T::from_usize(3))])
 }
 test_all_types!(test_saturated_zero_error_fit_d0_1);
 
@@ -272,10 +272,10 @@ fn test_saturated_zero_error_fit_d0_2<T: TestableSimd>() {
     saturated_zero_error_fit::<T, _>(
         [T::from_usize(1)],
         &[
-            -T::from_usize(3),
-            T::from_usize(5),
-            -T::from_usize(2),
-            T::from_usize(1),
+            (T::from_usize(1), -T::from_usize(3)),
+            (T::from_usize(1), T::from_usize(5)),
+            (T::from_usize(1), -T::from_usize(2)),
+            (T::from_usize(1), T::from_usize(1)),
         ],
     )
 }
@@ -284,7 +284,11 @@ test_all_types!(test_saturated_zero_error_fit_d0_2);
 fn test_saturated_zero_error_fit_d1_1<T: TestableSimd>() {
     saturated_zero_error_fit::<T, _>(
         [-T::from_usize(1), T::from_usize(2)],
-        &[T::from_usize(3), -T::from_usize(2), T::from_usize(0)],
+        &[
+            (T::from_usize(1), T::from_usize(3)),
+            (T::from_usize(1), -T::from_usize(2)),
+            (T::from_usize(1), T::from_usize(0)),
+        ],
     )
 }
 test_all_types!(test_saturated_zero_error_fit_d1_1);
@@ -292,10 +296,15 @@ test_all_types!(test_saturated_zero_error_fit_d1_1);
 fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
     let offset = -T::from_usize(50);
     let scale = T::from_usize(1);
-    let sample_positions: Vec<T> = (0..100)
+    let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
-        .map(|i| (T::from_usize(i) - offset) * scale)
+        .map(|i| {
+            (
+                T::exp(-T::from_usize(100 - i) / T::from_usize(10)),
+                (T::from_usize(i) - offset) * scale,
+            )
+        })
         .collect();
 
     saturated_zero_error_fit::<T, _>([T::from_usize(1), -T::from_usize(1)], &sample_positions)
@@ -305,19 +314,19 @@ test_all_types!(test_saturated_zero_error_fit_d1_2);
 fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
     let offset = T::from_usize(5);
     let scale = T::from_usize(10).recip();
-    let sample_positions: Vec<T> = (0..100)
+    let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
-        .map(|i| (T::from_usize(i) - offset) * scale)
+        .map(|i| {
+            (
+                T::exp(-T::from_usize(100 - i) / T::from_usize(10)),
+                (T::from_usize(i) - offset) * scale,
+            )
+        })
         .collect();
 
     saturated_zero_error_fit::<T, _>(
-        [
-            T::from_usize(1),
-            T::from_usize(2),
-            T::from_usize(3),
-            // T::from_usize(2),
-        ],
+        [T::from_usize(1), T::from_usize(2), T::from_usize(3)],
         &sample_positions,
     )
 }
