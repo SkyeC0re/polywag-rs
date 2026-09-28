@@ -186,6 +186,77 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     }
 }
 
+fn saturated_zero_error_shift_fit<T: TestableSimd, const K: usize>(
+    polynomial: KP1Array<T, K>,
+    monotonic_samples: &[(T, T)],
+    decay_rate: T,
+) {
+    let mut r = OnlinePolyfit::<T, K>::new();
+
+    let eval = |x: T| {
+        let mut y = T::SF_ZERO;
+        for c in polynomial.iter().copied().rev() {
+            y = y.mul_add(x, c);
+        }
+        y
+    };
+
+    let mut curr_x = T::from_usize(0);
+    let mut iter = monotonic_samples.into_iter();
+    if let Some(&(w, x)) = iter.next() {
+        r.update_at_zero(0, w, [eval(x)]);
+        curr_x = x;
+    }
+    for &(w, x) in iter {
+        r.shift(curr_x - x);
+        r.scale(T::exp(-(curr_x - x).abs() * decay_rate));
+        r.update_at_zero(0, w, [eval(x)]);
+        curr_x = x;
+    }
+    // Ensure the fit evaluates to the supplied polynomial.
+    r.shift(curr_x);
+
+    let [fit] = r.compute_fit();
+    let eps = test_eps::<T>();
+
+    // Instead of testing that the total error is exactly zero, we instead test
+    // that the error associated with the fit is zero relative to the total addressable error.
+    let [addressable_error] = r.addressable_error();
+    assert_eps_diff_eq(
+        addressable_error - fit.errors.error(K),
+        addressable_error,
+        eps,
+    );
+
+    for (i, (c_expected, c_found)) in polynomial
+        .iter()
+        .copied()
+        .zip(fit.fit.deg(K).iter().copied())
+        .enumerate()
+    {
+        assert!(
+            abs_diff_eq!(c_expected, c_found, epsilon = eps),
+            "Coefficient {} diverged: P_exp: {:?} != P_fit: {:?}",
+            i,
+            polynomial,
+            &*fit.fit.deg(K)
+        )
+    }
+
+    let p = fit.fit.deg(K);
+    for &(_, x) in monotonic_samples {
+        let expected = eval(x);
+        let found = p.evaluate_array([x])[0];
+        assert!(
+            eps_diff_eq(found, expected, eps),
+            "P({:?}) diverged: {:?} != {:?}",
+            x,
+            found,
+            expected
+        );
+    }
+}
+
 fn bias_fit<T: TestableSimd, const K: usize, const D: usize>(bias: KP1Array<(T, [T; D]), K>) {
     let r = OnlinePolyfit::<T, K, D>::new();
 
@@ -294,7 +365,7 @@ fn test_saturated_zero_error_fit_d1_1<T: TestableSimd>() {
 test_all_types!(test_saturated_zero_error_fit_d1_1);
 
 fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
-    let offset = -T::from_usize(50);
+    let offset = T::from_usize(90);
     let scale = T::from_usize(1);
     let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
@@ -312,14 +383,15 @@ fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
 test_all_types!(test_saturated_zero_error_fit_d1_2);
 
 fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
-    let offset = T::from_usize(5);
-    let scale = T::from_usize(10).recip();
+    let offset = T::from_usize(90);
+    let scale = T::from_usize(33).recip();
     let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
         .map(|i| {
             (
                 T::exp(-T::from_usize(100 - i) / T::from_usize(10)),
+                // T::from_usize(1),
                 (T::from_usize(i) - offset) * scale,
             )
         })
@@ -331,6 +403,22 @@ fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
     )
 }
 test_all_types!(test_saturated_zero_error_fit_d2_1);
+
+fn test_saturated_zero_error_shift_fit_d2_1<T: TestableSimd>() {
+    let scale = T::from_usize(10).recip();
+    let sample_positions: Vec<(T, T)> = (0..100)
+        .into_iter()
+        .rev()
+        .map(|i| (T::from_usize(1), T::from_usize(i) * scale))
+        .collect();
+
+    saturated_zero_error_shift_fit::<T, _>(
+        kp1_arr![T::from_usize(1), T::from_usize(2), T::from_usize(3)],
+        &sample_positions,
+        T::from_usize(1).recip(),
+    )
+}
+test_all_types!(test_saturated_zero_error_shift_fit_d2_1);
 
 fn test_bias_only_d0_1<T: TestableSimd>() {
     bias_fit(kp1_arr![(T::from_usize(1), [T::from_usize(2)])]);

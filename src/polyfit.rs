@@ -41,8 +41,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    /// Update the regression state from `x'` to `x = x' + delta_x`, effectively shifting the domain of the
-    /// regression to the left by `delta_x`.
+    /// Shift the regression state from `x'` to `x = x' + delta_x`, effectively shifting the domain of the
+    /// regression to the left by `delta_x`. Practically, if you had inserted at `x_i` previously, the shift would
+    /// make it as though you inserted at `x_i + delta_x` instead and the fit after the shift (`P(x)`) relates
+    /// to the fit before the shift (`P'(x')`) as follows:
+    ///
+    ///  `P(x) = P'(x - delta_x)`
     pub fn shift(&mut self, delta_x: T) {
         let old_xlks = self.xlks.clone();
         let mut coeffs = TwoKP1Array::<T, K>::zeroed();
