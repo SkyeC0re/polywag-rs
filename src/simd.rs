@@ -2,6 +2,7 @@ use bytemuck::Zeroable;
 use cfg_if::cfg_if;
 use core::{
     fmt::Debug,
+    marker::PhantomData,
     num::NonZeroUsize,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     ptr, slice,
@@ -66,8 +67,23 @@ macro_rules! wide_float_simd_field_impl {
             }
 
             #[inline(always)]
+            fn log2(self) -> Self {
+                self.log2()
+            }
+
+            #[inline(always)]
+            fn exp2(self) -> Self {
+                self.exp2()
+            }
+
+            #[inline(always)]
             fn recip(self) -> Self {
                Self::SF_ONE / self
+            }
+
+            #[inline(always)]
+            fn round(self) -> Self {
+                self.round()
             }
         }
         })*
@@ -151,7 +167,13 @@ pub trait SimdField:
 
     fn ln(self) -> Self;
 
+    fn log2(self) -> Self;
+
+    fn exp2(self) -> Self;
+
     fn recip(self) -> Self;
+
+    fn round(self) -> Self;
 }
 
 macro_rules! primitive_float_simd_field_impl {
@@ -211,8 +233,23 @@ macro_rules! primitive_float_simd_field_impl {
             }
 
             #[inline(always)]
+            fn log2(self) -> Self {
+                self.log2()
+            }
+
+            #[inline(always)]
+            fn exp2(self) -> Self {
+                self.exp2()
+            }
+
+            #[inline(always)]
             fn recip(self) -> Self {
                 self.recip()
+            }
+
+            #[inline(always)]
+            fn round(self) -> Self {
+                self.round()
             }
         }
         )*
@@ -221,16 +258,14 @@ macro_rules! primitive_float_simd_field_impl {
 
 primitive_float_simd_field_impl![f64, f32];
 
+#[allow(unused)]
+pub(crate) struct Proof<T>(PhantomData<T>);
+
 pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
     /// A `u8` array type which has at least half the size of `Self``.
-    type Half;
-
-    const _VALIDATE: () = const {
-        assert!(size_of::<Self::Half>().checked_div(0).unwrap() < 0);
-        ()
-    };
+    type Half: Copy + Zeroable;
 
     fn is_finite(&self) -> bool;
 
@@ -240,6 +275,10 @@ pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
 macro_rules! wide_simd_able_impl {
      ( $( $elm:ty : $simdt:ty : $half_len:expr),* ) => {
         $(
+        impl Proof<$elm> {
+            const _HALF_VALIDATION: () = const { assert!((size_of::<$elm>() >> 1) <= $half_len) };
+        }
+
         impl SimdAble for $elm {
             type SimdT = $simdt;
 

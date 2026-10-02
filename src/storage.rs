@@ -173,6 +173,7 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
 /// <br>(1, 0)    , (1, 1)    , (1, 2)    , ... , (1, K - 1)
 /// <br>(0, 0)    , (0, 1)    , (0, 2)    , ... , (0, K - 1), (0, K)
 #[repr(C)]
+#[derive(Clone)]
 pub(crate) struct YxlkSums<T: SimdAble + Copy, const K: usize>(
     T::Half,
     T::Half,
@@ -192,32 +193,36 @@ impl<T: SimdAble, const K: usize> YxlkSums<T, K> {
 
     #[inline(always)]
     pub const unsafe fn get_l_yxks(&self, l: usize) -> &[T] {
+        let kml = K - l;
         unsafe {
             slice::from_raw_parts(
-                ((&self.0) as *const _ as *const T).add((l * (l + 1)) >> 1),
-                l + 1,
+                ((&self.0) as *const _ as *const T).add((kml * (kml + 1)) >> 1),
+                kml + 1,
             )
         }
     }
 
     #[inline(always)]
     pub const unsafe fn get_l_yxk(&self, l: usize, i: usize) -> &T {
-        unsafe { &*((&self.0) as *const _ as *const T).add(((l * (l + 1)) >> 1) + i) }
+        let kml = K - l;
+        unsafe { &*((&self.0) as *const _ as *const T).add(((kml * (kml + 1)) >> 1) + i) }
     }
 
     #[inline(always)]
     pub const unsafe fn get_l_yxks_mut(&mut self, l: usize) -> &mut [T] {
         unsafe {
+            let kml = K - l;
             slice::from_raw_parts_mut(
-                ((&mut self.0) as *mut _ as *mut T).add((l * (l + 1)) >> 1),
-                l + 1,
+                ((&mut self.0) as *mut _ as *mut T).add((kml * (kml + 1)) >> 1),
+                kml + 1,
             )
         }
     }
 
     #[inline(always)]
     pub const unsafe fn get_l_yxk_mut(&mut self, l: usize, i: usize) -> &mut T {
-        unsafe { &mut *((&mut self.0) as *mut _ as *mut T).add(((l * (l + 1)) >> 1) + i) }
+        let kml = K - l;
+        unsafe { &mut *((&mut self.0) as *mut _ as *mut T).add(((kml * (kml + 1)) >> 1) + i) }
     }
 
     #[inline(always)]
