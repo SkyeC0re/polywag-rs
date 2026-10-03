@@ -12,19 +12,6 @@ use crate::{
     storage::{KP1Array, TwoKP1Array, XlkSums},
 };
 
-#[derive(Clone)]
-#[repr(C)]
-pub struct OnlinePolyfit<T: SimdAble, const K: usize, const D: usize = 1> {
-    factorials_1_up: [T; K],
-    xlks: XlkSums<T, K>,
-    /// Y_1[x^<array index>]
-    yxlks: [YxlkSums<T, K>; D],
-    /// Sum of all w_(l, i) y_(l, i)^2 for error calculation.
-    yys: [T; D],
-    max_l_insertion: usize,
-}
-
-#[inline]
 unsafe fn shift_power_sums<T: SimdAble>(
     power_sums: &mut [T],
     power_sums_ref_store: &mut [T],
@@ -58,6 +45,18 @@ unsafe fn shift_power_sums<T: SimdAble>(
             k += 1;
         }
     }
+}
+
+#[derive(Clone)]
+#[repr(C)]
+pub struct OnlinePolyfit<T: SimdAble, const K: usize, const D: usize = 1> {
+    factorials_1_up: [T; K],
+    xlks: XlkSums<T, K>,
+    /// Y_1[x^<array index>]
+    yxlks: [YxlkSums<T, K>; D],
+    /// Sum of all w_(l, i) y_(l, i)^2 for error calculation.
+    yys: [T; D],
+    max_l_insertion: usize,
 }
 
 impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
@@ -94,7 +93,9 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
             unsafe {
                 let xlks = self.xlks.get_l_xks_mut(l);
                 // Safety: xlks has (K - l) * 2 + 1 elements.
-                let rescale = T::exp2(T::round(T::log2(*xlks.get_unchecked(2)) / T::from_usize(2)));
+                let rescale = T::exp2(T::round(
+                    (T::log2(*xlks.get_unchecked(2))) / T::from_usize(2),
+                ));
                 let rescale_recip = rescale.recip();
                 for xlk in xlks.iter_mut() {
                     *xlk *= rescale;
@@ -196,6 +197,31 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
     /// which will be observed by the zero polynomial.
     pub fn addressable_error(&self) -> [T; D] {
         self.yys
+    }
+
+    fn safe_rescale_coeff(&self) -> T {
+        if K == 0 {
+            return T::SF_ONE;
+        }
+
+        // Safety: For all `l < K` the power sums go up to at least `k=2`.
+        unsafe {
+            let mut x0s = *self.xlks.get_l_xk(0, 0);
+            let mut x2s = *self.xlks.get_l_xk(0, 2);
+
+            for l in 1..(self.max_l_insertion + 1).min(K) {
+                x0s += *self.xlks.get_l_xk(l, 0);
+                x2s += *self.xlks.get_l_xk(l, 2);
+            }
+
+            let rescale = T::exp2(T::round((T::log2(x0s) - T::log2(x2s)) / T::from_usize(2)));
+
+            if T::is_finite(&rescale) {
+                rescale
+            } else {
+                T::SF_ONE
+            }
+        }
     }
 
     fn compute_fit_inner(
