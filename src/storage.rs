@@ -112,6 +112,8 @@ impl<T: SimdAble, const K: usize> DerefMut for TwoKP1Array<T, K> {
 #[repr(C)]
 pub(crate) struct XlkSums<T: SimdAble, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
 
+unsafe impl<T: SimdAble + Zeroable, const K: usize> Zeroable for XlkSums<T, K> {}
+
 impl<T: SimdAble, const K: usize> XlkSums<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
 
