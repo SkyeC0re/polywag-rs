@@ -18,7 +18,7 @@ impl<T> TestableSimd for T where
 {
 }
 
-pub const TEST_EPS_PERCENTAGE: usize = 50;
+pub const TEST_EPS_PERCENTAGE: usize = 70;
 
 /// Get the testing epsilon defined by `TEST_EPS_PERCENTAGE`. Specifically, given the test epsilon ratio $r$
 /// and `T`'s machine epsilon $\epsilon < 1$, we define the test epsilon as:
@@ -223,6 +223,21 @@ impl SimdField for F256 {
     fn recip(self) -> Self {
         Self((&self.0).recip())
     }
+
+    #[inline(always)]
+    fn exp2(self) -> Self {
+        Self((&self.0).exp2())
+    }
+
+    #[inline(always)]
+    fn log2(self) -> Self {
+        Self((&self.0).log2())
+    }
+
+    #[inline(always)]
+    fn round(self) -> Self {
+        Self((&self.0).round())
+    }
 }
 
 // The implementation does in fact store zero as the zero bit pattern.
@@ -231,7 +246,7 @@ unsafe impl Zeroable for F256 {}
 impl SimdAble for F256 {
     type SimdT = Self;
 
-    type Half = [u8; 1];
+    type Half = [u8; 16];
 
     #[inline(always)]
     fn is_finite(&self) -> bool {

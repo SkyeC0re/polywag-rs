@@ -186,11 +186,6 @@ pub(crate) struct YxlkSums<T: SimdAble + Copy, const K: usize>(
 impl<T: SimdAble, const K: usize> YxlkSums<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
 
-    #[inline]
-    pub const fn zeroed() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
-    }
-
     #[inline(always)]
     pub const unsafe fn get_l_yxks(&self, l: usize) -> &[T] {
         let kml = K - l;

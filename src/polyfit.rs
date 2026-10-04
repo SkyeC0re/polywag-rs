@@ -3,7 +3,7 @@ use core::mem::{self, MaybeUninit};
 use core::ops::DerefMut;
 use core::{ptr, slice};
 
-use bytemuck::Zeroable;
+use bytemuck::{Zeroable, zeroed};
 
 use crate::storage::{Fit, FitErrors, FitResult, YxlkSums};
 use crate::{
@@ -40,7 +40,15 @@ unsafe fn shift_power_sums<T: SimdAble>(
                     shifted_k_sum,
                 );
             }
-            *power_sums.get_unchecked_mut(k) = shifted_k_sum;
+
+            let curr_coeff = coeffs.get_unchecked_mut(0);
+            *curr_coeff *= delta_x;
+
+            *power_sums.get_unchecked_mut(k) = T::mul_add(
+                *curr_coeff,
+                *power_sums_ref_store.get_unchecked(0),
+                shifted_k_sum,
+            );
 
             k += 1;
         }
@@ -92,28 +100,28 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         for l in (0..K).rev() {
             unsafe {
                 let xlks = self.xlks.get_l_xks_mut(l);
-                // Safety: xlks has (K - l) * 2 + 1 elements.
-                let rescale = T::exp2(T::round(
-                    (T::log2(*xlks.get_unchecked(2))) / T::from_usize(2),
-                ));
-                let rescale_recip = rescale.recip();
-                for xlk in xlks.iter_mut() {
-                    *xlk *= rescale;
-                }
+                // // Safety: xlks has (K - l) * 2 + 1 elements.
+                // let rescale = T::exp2(T::round(
+                //     (T::log2(*xlks.get_unchecked(2))) / T::from_usize(2),
+                // ));
+                // let rescale_recip = rescale.recip();
+                // for xlk in xlks.iter_mut() {
+                //     *xlk *= rescale;
+                // }
                 shift_power_sums(xlks, &mut old_sums, &mut coeffs, delta_x);
-                for xlk in xlks.iter_mut() {
-                    *xlk *= rescale_recip;
-                }
+                // for xlk in xlks.iter_mut() {
+                //     *xlk *= rescale_recip;
+                // }
 
                 for yxks in &mut self.yxlks {
                     let yxlks = yxks.get_l_yxks_mut(l);
-                    for yxlk in yxlks.iter_mut() {
-                        *yxlk *= rescale;
-                    }
+                    // for yxlk in yxlks.iter_mut() {
+                    //     *yxlk *= rescale;
+                    // }
                     shift_power_sums(yxlks, &mut old_sums, &mut coeffs, delta_x);
-                    for yxlk in yxlks.iter_mut() {
-                        *yxlk *= rescale_recip;
-                    }
+                    // for yxlk in yxlks.iter_mut() {
+                    //     *yxlk *= rescale_recip;
+                    // }
                 }
             }
         }
@@ -200,6 +208,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
     }
 
     fn safe_rescale_coeff(&self) -> T {
+        return T::SF_ONE;
         if K == 0 {
             return T::SF_ONE;
         }
@@ -224,14 +233,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    fn compute_fit_inner(
-        xlks: &XlkSums<T, K>,
-        yxks: &mut [KP1Array<T, K>; D],
-        yys: [T; D],
-        max_l: usize,
-        bias: KP1Array<(T, [T; D]), K>,
-    ) -> [FitResult<T, K>; D] {
-        let mut fit_res = yys.map(|yys| {
+    fn compute_fit_inner(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
+        let mut fit_res = self.yys.map(|yys| {
             let mut errors = FitErrors::zeroed();
             unsafe { *errors.errors_mut().get_unchecked_mut(0) = yys }
             FitResult::<T, K> {
@@ -246,30 +249,39 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
 
         unsafe {
+            let rescale = self.safe_rescale_coeff();
+            let rescale_recip = rescale.recip();
+            let rescale_recip_sq = rescale_recip * rescale_recip;
             let w_b = bias.get_unchecked(0).0;
-            let gamma_0 = (*xlks.get_l_xk(0, 0) + w_b).max(w_b);
+            let gamma_0 = (*self.xlks.get_l_xk(0, 0) + w_b).max(w_b);
             let gamma_0_recip = gamma_0.recip();
             // <x^k, x^{k_prime}>
             let mut inner_products =
                 MaybeUninit::<KP1Array<KP1Array<T, K>, K>>::zeroed().assume_init();
             {
                 *inner_products.get_unchecked_mut(0).get_unchecked_mut(0) = gamma_0;
+                let mut rescale_k = T::SF_ONE;
                 for k in 1..(K + 1) {
+                    rescale_k *= rescale;
+
+                    // 2^{r(k + k_prime)}
+                    let mut rescale_kkp = rescale_k;
                     for k_prime in 0..=k {
+                        let kk_prime = k + k_prime;
+
                         let mut left = T::from_usize(k);
                         let mut right = T::from_usize(k_prime);
-                        let mut mul = T::SF_ONE;
-
-                        let kk_prime = k + k_prime;
-                        let mut xkxk_prime = *xlks.get_l_xk(0, kk_prime);
-
-                        for l in 1..(k_prime.min(max_l) + 1) {
-                            mul *= left * right;
+                        let mut mul = rescale_kkp;
+                        let mut xkxk_prime = *self.xlks.get_l_xk(0, kk_prime) * rescale_kkp;
+                        for l in 1..(k_prime.min(self.max_l_insertion) + 1) {
+                            mul *= left * right * rescale_recip_sq;
                             left -= T::SF_ONE;
                             right -= T::SF_ONE;
 
-                            xkxk_prime =
-                                xlks.get_l_xk(l, kk_prime - l - l).mul_add(mul, xkxk_prime);
+                            xkxk_prime = self
+                                .xlks
+                                .get_l_xk(l, kk_prime - l - l)
+                                .mul_add(mul, xkxk_prime);
                         }
 
                         *inner_products
@@ -278,7 +290,34 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                         *inner_products
                             .get_unchecked_mut(k_prime)
                             .get_unchecked_mut(k) = xkxk_prime;
+
+                        rescale_kkp *= rescale;
                     }
+                }
+            }
+
+            let mut yxks = zeroed::<[KP1Array<T, K>; D]>();
+            for d in 0..D {
+                let yxlks = self.yxlks.get_unchecked(d);
+
+                let yxks = yxks.get_unchecked_mut(d);
+                *yxks.get_unchecked_mut(0) = *yxlks.get_l_yxk(0, 0);
+
+                let mut rescale_k = T::SF_ONE;
+                for k in 1..(K + 1) {
+                    rescale_k *= rescale;
+
+                    let mut right = T::from_usize(k);
+                    let mut mul = rescale_k;
+                    let mut yxk = *yxlks.get_l_yxk(0, k) * rescale_k;
+                    for l in 1..(k.min(self.max_l_insertion) + 1) {
+                        mul *= right * rescale_recip;
+                        right -= T::SF_ONE;
+
+                        yxk = yxlks.get_l_yxk(l, k - l).mul_add(mul, yxk);
+                    }
+
+                    *yxks.get_unchecked_mut(k) = yxk;
                 }
             }
 
@@ -336,6 +375,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     p_k.as_mut_ptr(),
                     k,
                 );
+
+                println!("{p_k:?}");
 
                 for k_left in (0..=K).rev() {
                     let inner_products = inner_products.get_unchecked(k_left);
@@ -421,6 +462,17 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     }
                 }
             }
+
+            for fit_res in fit_res.iter_mut() {
+                for k in 1..(K + 1) {
+                    let fit = fit_res.fit.get_pk_mut(k);
+                    let mut mul = T::SF_ONE;
+                    for i in 1..=k {
+                        mul *= rescale;
+                        *fit.get_unchecked_mut(i) *= mul;
+                    }
+                }
+            }
         }
 
         fit_res
@@ -428,23 +480,11 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
 
     #[inline]
     pub fn compute_fit(&self) -> [FitResult<T, K>; D] {
-        Self::compute_fit_inner(
-            &self.xlks,
-            &mut self.yxlks.clone(),
-            self.yys,
-            self.max_l_insertion,
-            Zeroable::zeroed(),
-        )
+        self.compute_fit_inner(zeroed())
     }
 
     #[inline]
     pub fn compute_fit_with_bias(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
-        Self::compute_fit_inner(
-            &self.xlks,
-            &mut self.yxlks.clone(),
-            self.yys,
-            self.max_l_insertion,
-            bias,
-        )
+        self.compute_fit_inner(bias)
     }
 }

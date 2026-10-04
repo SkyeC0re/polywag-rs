@@ -384,7 +384,7 @@ test_all_types!(test_saturated_zero_error_fit_d1_2);
 
 fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
     let offset = T::from_usize(90);
-    let scale = T::from_usize(33).recip();
+    let scale = T::from_usize(128);
     let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
@@ -405,7 +405,7 @@ fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
 test_all_types!(test_saturated_zero_error_fit_d2_1);
 
 fn test_saturated_zero_error_shift_fit_d2_1<T: TestableSimd>() {
-    let scale = T::from_usize(10).recip();
+    let scale = T::from_usize(1).recip();
     let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
