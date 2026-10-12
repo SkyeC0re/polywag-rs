@@ -3,7 +3,7 @@ mod common;
 use approx::{abs_diff_eq, assert_abs_diff_eq};
 use core::ops::Add;
 use pastey::paste;
-use polywag::{KP1Array, OnlinePolyfit, kp1_arr, simd::SimdField};
+use polywag::{KP1Array, RegressionState, kp1_arr, simd::SimdField};
 
 use crate::common::{F256, TestableSimd, assert_eps_diff_eq, eps_diff_eq, test_eps};
 
@@ -13,8 +13,8 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
     y: fn(T) -> T,
     samples: usize,
 ) {
-    let mut regressor = OnlinePolyfit::<T, K>::new();
-    let mut f256_regressor = OnlinePolyfit::<F256, K>::new();
+    let mut regressor = RegressionState::<T, K>::new();
+    let mut f256_regressor = RegressionState::<F256, K>::new();
     let scaling = T::SF_ONE / T::from_usize(samples);
 
     for x in 0..=samples {
@@ -95,7 +95,7 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     let half = T::SF_ONE / T::from_usize(2);
     let quarter = T::SF_ONE / T::from_usize(4);
 
-    let mut regressor = OnlinePolyfit::<T, 2, 3>::new();
+    let mut regressor = RegressionState::<T, 2, 3>::new();
 
     for x in 0..10 {
         let x = T::from_usize(x);
@@ -132,7 +132,7 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     polynomial: [T; KP1],
     samples: &[(T, T)],
 ) {
-    let mut r = OnlinePolyfit::<T, KP1>::new();
+    let mut r = RegressionState::<T, KP1>::new();
 
     let eval = |x: T| {
         let mut y = T::SF_ZERO;
@@ -191,7 +191,7 @@ fn saturated_zero_error_shift_fit<T: TestableSimd, const K: usize>(
     monotonic_samples: &[(T, T)],
     decay_rate: T,
 ) {
-    let mut r = OnlinePolyfit::<T, K>::new();
+    let mut r = RegressionState::<T, K>::new();
 
     let eval = |x: T| {
         let mut y = T::SF_ZERO;
@@ -258,7 +258,7 @@ fn saturated_zero_error_shift_fit<T: TestableSimd, const K: usize>(
 }
 
 fn bias_fit<T: TestableSimd, const K: usize, const D: usize>(bias: KP1Array<(T, [T; D]), K>) {
-    let r = OnlinePolyfit::<T, K, D>::new();
+    let r = RegressionState::<T, K, D>::new();
 
     let fit = r.compute_fit_with_bias(bias.clone());
     let eps = test_eps::<T>();
@@ -366,7 +366,7 @@ test_all_types!(test_saturated_zero_error_fit_d1_1);
 
 fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
     let offset = T::from_usize(90);
-    let scale = T::from_usize(1);
+    let scale = T::from_usize(100).recip();
     let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
@@ -384,14 +384,13 @@ test_all_types!(test_saturated_zero_error_fit_d1_2);
 
 fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
     let offset = T::from_usize(90);
-    let scale = T::from_usize(128);
+    let scale = T::from_usize(33).recip();
     let sample_positions: Vec<(T, T)> = (0..100)
         .into_iter()
         .rev()
         .map(|i| {
             (
                 T::exp(-T::from_usize(100 - i) / T::from_usize(10)),
-                // T::from_usize(1),
                 (T::from_usize(i) - offset) * scale,
             )
         })

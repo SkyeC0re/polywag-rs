@@ -51,18 +51,28 @@ unsafe fn shift_power_sums<T: SimdAble>(
     }
 }
 
+/// The raw regression state. It is online in the sense that it does not
+/// store inserted samples individually, only aggregated state variables. This
+/// allows future samples to be inserted and the regression polynomials to be
+/// computed at the same speed regardless of how many samples are currently contained
+/// in the regression.
+///
+/// Although it is possible to use this structure for predefined sampling locations and weights,
+/// such as a cubic spline, its strength lies in the fact that it can be used as an infinite
+/// response filter, similar to a kalman filter for a set of uncorrelated variables and their derivatives.
 #[derive(Clone)]
 #[repr(C)]
-pub struct OnlinePolyfit<T: SimdAble, const K: usize, const D: usize = 1> {
+pub struct RegressionState<T: SimdAble, const K: usize, const D: usize = 1> {
     factorials_1_up: [T; K],
     xlks: XlkSums<T, K>,
-    /// Sum of all w_(l, i) y_(l, i)^2 for error calculation.
     yxks: [KP1Array<T, K>; D],
+    /// Sum of all w_(l, i) y_(l, i)^2 for error calculation.
     yys: [T; D],
     max_l_insertion: usize,
 }
 
-impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
+impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
+    /// Create a new regression without any samples.
     pub fn new() -> Self {
         let mut factorial_value: T = T::SF_ONE;
         let mut mult: T = T::SF_ONE;
@@ -108,7 +118,7 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    /// Scale all sample weights by `scale`.
+    /// Scale all previously inserted samples' weights by `scale`.
     pub fn scale(&mut self, scale: T) {
         for xlk in self.xlks.as_raw_slice_mut() {
             *xlk *= scale;
@@ -125,8 +135,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    pub fn update_at_zero(&mut self, derivative: usize, w: T, ys: [T; D]) {
-        let l = derivative;
+    /// Adds the weighted sample $w_{l, i} \[y_{l, i} - f^{(l)}(0)\]^2$ for all `y` dimensions.
+    ///
+    /// # Notes
+    ///
+    /// `w` must be non-negative.
+    pub fn update_at_zero(&mut self, l: usize, w: T, ys: [T; D]) {
         if l > K {
             return;
         }
@@ -151,8 +165,12 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    pub fn update(&mut self, derivative: usize, w: T, x: T, ys: [T; D]) {
-        let l = derivative;
+    /// Adds the weighted sample $w_{l, i} \[y_{l, i} - f^{(l)}(x_{l, i})\]^2$ for all `y` dimensions.
+    ///
+    /// # Notes
+    ///
+    /// `w` must be non-negative.
+    pub fn update(&mut self, l: usize, w: T, x: T, ys: [T; D]) {
         if l > K {
             return;
         }
@@ -189,21 +207,8 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         }
     }
 
-    /// Returns the sum of all sample weights:
-    /// $$\sum_{l=0}^{K}\sum_{i=1}^{N_l} w_{l, i}$$
-    pub fn weight(&self) -> T {
-        unsafe {
-            let mut sum = *self.xlks.get_l_xk(K, 0);
-            for l in (0..K).rev() {
-                sum += *self.xlks.get_l_xk(l, 0);
-            }
-
-            sum
-        }
-    }
-
-    /// Returns the total squared error
-    /// which will be observed by the zero polynomial.
+    /// Returns the total squared error which will be observed by the zero polynomial.
+    #[inline(always)]
     pub fn addressable_error(&self) -> [T; D] {
         self.yys
     }
@@ -319,8 +324,6 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
                     k,
                 );
 
-                println!("{p_k:?}");
-
                 for k_left in (0..=K).rev() {
                     let inner_products = inner_products.get_unchecked(k_left);
                     let xkpk = xkpk.get_unchecked_mut(k_left);
@@ -410,11 +413,64 @@ impl<T: SimdAble, const K: usize, const D: usize> OnlinePolyfit<T, K, D> {
         fit_res
     }
 
+    /// Compute the least squares polynomial regressions (`f_k`) up to degree `K` and the corresponding remaining error.
+    ///
+    /// # Notes
+    ///
+    /// It is recommended to use [`fn@Self::compute_fit_with_bias`] to set a low weight bias in case the current samples
+    /// are not sufficient to produce a unique solution. Calling this method is equivalent to calling the aforementioned
+    /// method with zero weight biases for all `k <= K`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// extern crate polywag;
+    /// use polywag::{RegressionState, kp1_arr};
+    ///
+    /// let mut r = RegressionState::<f32, 2>::new();
+    ///
+    /// r.update(0, 1.0, 0.0, [2.0]);
+    /// r.update(0, 1.0, 1.0, [3.0]);
+    /// r.update(0, 1.0, 2.0, [4.0]);
+    ///
+    /// // Should produce the following polynomials regressions up to degree 2:
+    /// // [ 3.0, 0.0, 0.0 ]
+    /// // [ 2.0, 1.0, 0.0 ]
+    /// // [ 2.0, 1.0, 0.0 ]
+    /// let [fit] = r.compute_fit();
+    /// ```
     #[inline]
     pub fn compute_fit(&self) -> [FitResult<T, K>; D] {
         self.compute_fit_inner(zeroed())
     }
 
+    /// Compute the least squares polynomial regressions (`f_k`) up to degree `K` and the corresponding remaining error. This
+    /// function accepts a bias at `x = 0`, which specifies `K + 1` samples, one for each derivative of `f_K`. The bias is given
+    /// is of the form: `(w, [y1, y2, y3, ...])`.
+    ///
+    /// # Note
+    ///
+    /// No weight may be negative.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// extern crate polywag;
+    /// use polywag::{RegressionState, kp1_arr};
+    ///
+    /// let r = RegressionState::<f32, 2>::new();
+    ///
+    /// // Should produce the following polynomials regressions up to degree 2:
+    /// // [ 0.0, 0.0, 0.0 ]
+    /// // [ 0.0, 1.0, 0.0 ]
+    /// // [ 0.0, 1.0, 2.0 ]
+    /// let [fit] = r.compute_fit_with_bias(kp1_arr![
+    ///     (1.0, [0.0]),
+    ///     (1.0, [1.0]),
+    ///     (1.0, [2.0]),
+    /// ]);
+    /// ```
+    ///
     #[inline]
     pub fn compute_fit_with_bias(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
         self.compute_fit_inner(bias)

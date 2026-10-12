@@ -1,5 +1,4 @@
 extern crate alloc;
-use core::ffi::c_void;
 use core::fmt::Debug;
 use core::mem::MaybeUninit;
 use core::ops::Deref;
@@ -42,7 +41,7 @@ impl<T, const K: usize> KP1Array<T, K> {
 #[macro_export]
 macro_rules! kp1_arr {
     [$first:expr $(,$rest:expr)* $(,)?] => {
-        KP1Array::new(
+        $crate::KP1Array::new(
             $first,
             [$($rest,)*]
         )
@@ -117,11 +116,6 @@ unsafe impl<T: SimdAble + Zeroable, const K: usize> Zeroable for XlkSums<T, K> {
 impl<T: SimdAble, const K: usize> XlkSums<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
 
-    #[inline]
-    pub const fn zeroed() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
-    }
-
     #[inline(always)]
     pub const unsafe fn get_l_xks(&self, l: usize) -> &[T] {
         let kml = K - l;
@@ -163,68 +157,6 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
         }
 
         list.finish()
-    }
-}
-
-/// Stores all sums $\sum_{i=1}^{N_l} w_{l, i} y_{l, i} x_{l, i}^k$ in the following form (l, k):
-/// <br>(K, 0)
-/// <br>(K - 1, 0), (K - 1, 1)
-/// <br>                    .
-/// <br>                    .
-/// <br>                    .
-/// <br>(1, 0)    , (1, 1)    , (1, 2)    , ... , (1, K - 1)
-/// <br>(0, 0)    , (0, 1)    , (0, 2)    , ... , (0, K - 1), (0, K)
-#[repr(C)]
-#[derive(Clone)]
-pub(crate) struct YxlkSums<T: SimdAble + Copy, const K: usize>(
-    T::Half,
-    T::Half,
-    [[T::Half; 3]; K],
-    [[T::Half; K]; K],
-    // ZST for alignment
-    [T; 0],
-);
-
-impl<T: SimdAble, const K: usize> YxlkSums<T, K> {
-    const LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
-
-    #[inline(always)]
-    pub const unsafe fn get_l_yxks(&self, l: usize) -> &[T] {
-        let kml = K - l;
-        unsafe {
-            slice::from_raw_parts(
-                ((&self.0) as *const _ as *const T).add((kml * (kml + 1)) >> 1),
-                kml + 1,
-            )
-        }
-    }
-
-    #[inline(always)]
-    pub const unsafe fn get_l_yxk(&self, l: usize, i: usize) -> &T {
-        let kml = K - l;
-        unsafe { &*((&self.0) as *const _ as *const T).add(((kml * (kml + 1)) >> 1) + i) }
-    }
-
-    #[inline(always)]
-    pub const unsafe fn get_l_yxks_mut(&mut self, l: usize) -> &mut [T] {
-        unsafe {
-            let kml = K - l;
-            slice::from_raw_parts_mut(
-                ((&mut self.0) as *mut _ as *mut T).add((kml * (kml + 1)) >> 1),
-                kml + 1,
-            )
-        }
-    }
-
-    #[inline(always)]
-    pub const unsafe fn get_l_yxk_mut(&mut self, l: usize, i: usize) -> &mut T {
-        let kml = K - l;
-        unsafe { &mut *((&mut self.0) as *mut _ as *mut T).add(((kml * (kml + 1)) >> 1) + i) }
-    }
-
-    #[inline(always)]
-    pub const fn as_raw_slice_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut _ as *mut T, Self::LEN) }
     }
 }
 

@@ -7,7 +7,6 @@ use core::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     ptr, slice,
 };
-use wide::AlignTo;
 
 use pastey::paste;
 
