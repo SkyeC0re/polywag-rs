@@ -16,6 +16,7 @@ bytemuck = {version= "1.25.2", features=["min_const_generics", "const_zeroed"]}
 approx = "0.5.1"
 f256 = { version = "0.11.2", default-features = false }
 criterion = {version = "0.8.2", features = ["html_reports"]}
+rand = "0.10.3"
 
 
 [[bench]]

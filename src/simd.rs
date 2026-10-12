@@ -126,6 +126,10 @@ cfg_if! {
     }
 }
 
+/// # Warning
+///
+/// Although this trait is public, it is not meant to imported or implemented as its API
+/// cannot yet be considered stable.
 pub trait SimdField:
     Copy
     + Add<Output = Self>
@@ -260,6 +264,10 @@ primitive_float_simd_field_impl![f64, f32];
 #[allow(unused)]
 pub(crate) struct Proof<T>(PhantomData<T>);
 
+/// # Warning
+///
+/// Although this trait is public, it is not meant to imported or implemented as its API
+/// cannot yet be considered stable.
 pub trait SimdAble: SimdField<Element = Self> + PartialOrd + Debug {
     type SimdT: SimdField<Element = Self>;
 
@@ -303,7 +311,7 @@ wide_simd_able_impl![
 ];
 
 #[inline(always)]
-pub(crate) unsafe fn zip_compute_assign<
+pub(crate) unsafe fn _zip_compute_assign<
     const A: usize,
     const RA: usize,
     const R: usize,

@@ -60,6 +60,13 @@ unsafe fn shift_power_sums<T: SimdAble>(
 /// Although it is possible to use this structure for predefined sampling locations and weights,
 /// such as a cubic spline, its strength lies in the fact that it can be used as an infinite
 /// response filter, similar to a kalman filter for a set of uncorrelated variables and their derivatives.
+///
+/// # Usage Notes
+///
+/// In order to achieve and retain maximum regression accuracy it is recommended to keep the regression domain
+/// centered around the highest weighted samples. For the purposes of using this as an infinite response filter,
+/// this means regular periodic shifting of the domain to the current time. A good time to do so is usually
+/// just before computing the regression.
 #[derive(Clone)]
 #[repr(C)]
 pub struct RegressionState<T: SimdAble, const K: usize, const D: usize = 1> {
@@ -96,6 +103,10 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
     /// to the fit before the shift (`P'(x')`) as follows:
     ///
     ///  `P(x) = P'(x - delta_x)`
+    ///
+    /// # Usage Notes
+    ///
+    ///
     pub fn shift(&mut self, delta_x: T) {
         let mut old_sums = TwoKP1Array::<T, K>::zeroed();
         let mut coeffs = TwoKP1Array::<T, K>::zeroed();
@@ -103,7 +114,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
         // Iterating in reverse order guarantees that we are stepping through the `xlk` and `yxlk` elements in
         // storage order. `l=K` also only contains the zoroeth degree powers and does not need to be considered.
         unsafe {
-            for l in (0..K).rev() {
+            for l in (0..K.min(self.max_l_insertion + 1)).rev() {
                 shift_power_sums(
                     self.xlks.get_l_xks_mut(l),
                     &mut old_sums,

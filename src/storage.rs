@@ -11,6 +11,7 @@ use bytemuck::Zeroable;
 use crate::SPolynomial;
 use crate::simd::SimdAble;
 
+/// An array with `K + 1` entries.
 #[derive(Clone)]
 #[repr(C)]
 pub struct KP1Array<T, const K: usize>(T, [T; K]);
@@ -27,17 +28,32 @@ impl<T: SimdAble, const K: usize> Debug for KP1Array<T, K> {
 impl<T, const K: usize> KP1Array<T, K> {
     pub const LEN: usize = K + 1;
 
+    /// Create a new array by specific the required first element, along with the
+    /// tail `K` elements.
     #[inline(always)]
     pub const fn new(first: T, rest: [T; K]) -> Self {
         Self(first, rest)
     }
 
+    /// Create a new array by applying `f` over the values of the
+    /// old array.
     #[inline]
     pub fn map<O, F: FnMut(T) -> O>(self, mut f: F) -> KP1Array<O, K> {
         KP1Array::new(f(self.0), self.1.map(f))
     }
 }
 
+/// Create a [`struct@KP1Array`] with `K` inferred by usage.
+///
+/// # Examples
+///
+/// ```rust
+/// extern crate polywag;
+/// use polywag::kp1_arr;
+///
+/// // Create an array with K=3.
+/// let arr = kp1_arr![0.0, 1.0, 2.0, 3.0];
+/// ```
 #[macro_export]
 macro_rules! kp1_arr {
     [$first:expr $(,$rest:expr)* $(,)?] => {

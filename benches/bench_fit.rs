@@ -1,33 +1,62 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use polywag::{RegressionState, simd::SimdAble};
+use rand::RngExt;
 use std::hint::black_box;
 
+fn random_state_f32<const K: usize>(samples: usize, step: f32) -> RegressionState<f32, K> {
+    let mut rng = rand::rng();
+
+    let mut x = 0.0;
+    let mut r = RegressionState::<f32, K>::new();
+    let w = 1.0 / samples as f32;
+    for _ in 0..samples {
+        r.update(0, w, x, [rng.random()]);
+        x += step;
+    }
+
+    r
+}
+
 fn criterion_benchmark(c: &mut Criterion) {
-    // c.bench_function("fit 1000 f32", |b| {
-    //     let mut poly = RawPolynomial::new();
+    c.bench_function("f32 k=2 compute_fit", |b| {
+        b.iter_batched_ref(
+            || random_state_f32::<2>(100, 0.01),
+            |r| {
+                black_box(r.compute_fit());
+            },
+            BatchSize::SmallInput,
+        );
+    });
 
-    //     let xs = (0..1000).map(|i| (i as f32) * 0.01).collect::<Vec<_>>();
-    //     let ys = Vec::from_iter(xs.iter().copied().map(|x| x * x + x + 1.0));
+    c.bench_function("f32 k=3 compute_fit", |b| {
+        b.iter_batched_ref(
+            || random_state_f32::<3>(100, 0.01),
+            |r| {
+                black_box(r.compute_fit());
+            },
+            BatchSize::SmallInput,
+        );
+    });
 
-    //     let cfg = PolyfitCfg::<f32>::new_with_max_deg(2);
+    c.bench_function("f32 k=2 shift", |b| {
+        b.iter_batched_ref(
+            || random_state_f32::<2>(100, 0.01),
+            |r| {
+                black_box(r.shift(-0.1));
+            },
+            BatchSize::SmallInput,
+        );
+    });
 
-    //     let mut ws = polywag::Bump::new();
-    //     poly.polyfit_from_iter(
-    //         &ws,
-    //         cfg,
-    //         xs.iter().zip(ys.iter()).map(|(x, y)| (1.0, *x, [*y])),
-    //     );
-    //     ws.reset();
-
-    //     b.iter(|| {
-    //         black_box(poly.polyfit_from_iter(
-    //             &ws,
-    //             cfg,
-    //             xs.iter().zip(ys.iter()).map(|(x, y)| (1.0, *x, [*y])),
-    //         ));
-
-    //         ws.reset();
-    //     });
-    // });
+    c.bench_function("f32 k=3 shift", |b| {
+        b.iter_batched_ref(
+            || random_state_f32::<3>(100, 0.01),
+            |r| {
+                black_box(r.shift(-0.1));
+            },
+            BatchSize::SmallInput,
+        );
+    });
 }
 
 criterion_group!(benches, criterion_benchmark);
