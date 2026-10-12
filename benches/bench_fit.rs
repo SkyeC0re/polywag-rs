@@ -1,5 +1,5 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use polywag::{RegressionState, simd::SimdAble};
+use polywag::RegressionState;
 use rand::RngExt;
 use std::hint::black_box;
 

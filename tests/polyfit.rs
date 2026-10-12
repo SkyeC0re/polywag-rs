@@ -1,6 +1,6 @@
 mod common;
 
-use approx::{abs_diff_eq, assert_abs_diff_eq};
+// use approx::{abs_diff_eq, assert_abs_diff_eq};
 use core::ops::Add;
 use pastey::paste;
 use polywag::{KP1Array, RegressionState, kp1_arr, simd::SimdField};
@@ -115,28 +115,28 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     let poly = regressor.compute_fit().each_ref().map(|r| r.fit.max_deg());
 
     let eps = test_eps();
-    assert_abs_diff_eq!(poly[0][0], T::SF_ONE, epsilon = eps);
-    assert_abs_diff_eq!(poly[0][1], T::SF_ZERO, epsilon = eps);
-    assert_abs_diff_eq!(poly[0][2], T::SF_ZERO, epsilon = eps);
+    assert_eps_diff_eq(poly[0][0], T::SF_ONE, eps);
+    assert_eps_diff_eq(poly[0][1], T::SF_ZERO, eps);
+    assert_eps_diff_eq(poly[0][2], T::SF_ZERO, eps);
 
-    assert_abs_diff_eq!(poly[1][0], T::SF_ONE, epsilon = eps);
-    assert_abs_diff_eq!(poly[1][1], half, epsilon = eps);
-    assert_abs_diff_eq!(poly[1][2], T::SF_ZERO, epsilon = eps);
+    assert_eps_diff_eq(poly[1][0], T::SF_ONE, eps);
+    assert_eps_diff_eq(poly[1][1], half, eps);
+    assert_eps_diff_eq(poly[1][2], T::SF_ZERO, eps);
 
-    assert_abs_diff_eq!(poly[2][0], T::SF_ONE, epsilon = eps);
-    assert_abs_diff_eq!(poly[2][1], half, epsilon = eps);
-    assert_abs_diff_eq!(poly[2][2], quarter, epsilon = eps);
+    assert_eps_diff_eq(poly[2][0], T::SF_ONE, eps);
+    assert_eps_diff_eq(poly[2][1], half, eps);
+    assert_eps_diff_eq(poly[2][2], quarter, eps);
 }
 
-fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
-    polynomial: [T; KP1],
+fn saturated_zero_error_fit<T: TestableSimd, const K: usize>(
+    polynomial: KP1Array<T, K>,
     samples: &[(T, T)],
 ) {
-    let mut r = RegressionState::<T, KP1>::new();
+    let mut r = RegressionState::<T, K>::new();
 
     let eval = |x: T| {
         let mut y = T::SF_ZERO;
-        for c in polynomial.into_iter().rev() {
+        for c in polynomial.iter().copied().rev() {
             y = y.mul_add(x, c);
         }
         y
@@ -153,26 +153,27 @@ fn saturated_zero_error_fit<T: TestableSimd, const KP1: usize>(
     // that the error associated with the fit is zero relative to the total addressable error.
     let [addressable_error] = r.addressable_error();
     assert_eps_diff_eq(
-        addressable_error - fit.errors.error(KP1 - 1),
+        addressable_error - fit.errors.error(K),
         addressable_error,
         eps,
     );
 
     for (i, (c_expected, c_found)) in polynomial
-        .into_iter()
-        .zip(fit.fit.deg(KP1 - 1).iter().copied())
+        .iter()
+        .copied()
+        .zip(fit.fit.max_deg().iter().copied())
         .enumerate()
     {
         assert!(
-            abs_diff_eq!(c_expected, c_found, epsilon = eps),
+            eps_diff_eq(c_expected, c_found, eps),
             "Coefficient {} diverged: P_exp: {:?} != P_fit: {:?}",
             i,
             polynomial,
-            &fit.fit.deg(KP1 - 1)[0..KP1]
+            &*fit.fit.max_deg()
         )
     }
 
-    let p = fit.fit.deg(KP1 - 1);
+    let p = fit.fit.max_deg();
     for &(_, x) in samples {
         let expected = eval(x);
         let found = p.evaluate_array([x])[0];
@@ -235,7 +236,7 @@ fn saturated_zero_error_shift_fit<T: TestableSimd, const K: usize>(
         .enumerate()
     {
         assert!(
-            abs_diff_eq!(c_expected, c_found, epsilon = eps),
+            eps_diff_eq(c_expected, c_found, eps),
             "Coefficient {} diverged: P_exp: {:?} != P_fit: {:?}",
             i,
             polynomial,
@@ -272,7 +273,7 @@ fn bias_fit<T: TestableSimd, const K: usize, const D: usize>(bias: KP1Array<(T, 
             .enumerate()
         {
             assert!(
-                abs_diff_eq!(c_expected, c_found, epsilon = eps),
+                eps_diff_eq(c_expected, c_found, eps),
                 "Dim {}: Coefficient {} diverged: P_bias: {:?} != P_fit: {:?}",
                 dim,
                 i,
@@ -335,13 +336,16 @@ fn test_online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
 test_all_types!(test_online_multi_dem_increasing_deg_fit);
 
 fn test_saturated_zero_error_fit_d0_1<T: TestableSimd>() {
-    saturated_zero_error_fit::<T, _>([-T::from_usize(1)], &[(T::from_usize(1), T::from_usize(3))])
+    saturated_zero_error_fit::<T, _>(
+        kp1_arr![-T::from_usize(1)],
+        &[(T::from_usize(1), T::from_usize(3))],
+    )
 }
 test_all_types!(test_saturated_zero_error_fit_d0_1);
 
 fn test_saturated_zero_error_fit_d0_2<T: TestableSimd>() {
     saturated_zero_error_fit::<T, _>(
-        [T::from_usize(1)],
+        kp1_arr![T::from_usize(1)],
         &[
             (T::from_usize(1), -T::from_usize(3)),
             (T::from_usize(1), T::from_usize(5)),
@@ -354,7 +358,7 @@ test_all_types!(test_saturated_zero_error_fit_d0_2);
 
 fn test_saturated_zero_error_fit_d1_1<T: TestableSimd>() {
     saturated_zero_error_fit::<T, _>(
-        [-T::from_usize(1), T::from_usize(2)],
+        kp1_arr![-T::from_usize(1), T::from_usize(2)],
         &[
             (T::from_usize(1), T::from_usize(3)),
             (T::from_usize(1), -T::from_usize(2)),
@@ -378,7 +382,10 @@ fn test_saturated_zero_error_fit_d1_2<T: TestableSimd>() {
         })
         .collect();
 
-    saturated_zero_error_fit::<T, _>([T::from_usize(1), -T::from_usize(1)], &sample_positions)
+    saturated_zero_error_fit::<T, _>(
+        kp1_arr![T::from_usize(1), -T::from_usize(1)],
+        &sample_positions,
+    )
 }
 test_all_types!(test_saturated_zero_error_fit_d1_2);
 
@@ -397,11 +404,36 @@ fn test_saturated_zero_error_fit_d2_1<T: TestableSimd>() {
         .collect();
 
     saturated_zero_error_fit::<T, _>(
-        [T::from_usize(1), T::from_usize(2), T::from_usize(3)],
+        kp1_arr![T::from_usize(1), T::from_usize(2), T::from_usize(3)],
         &sample_positions,
     )
 }
 test_all_types!(test_saturated_zero_error_fit_d2_1);
+
+fn test_saturated_zero_error_fit_d3_1<T: TestableSimd>() {
+    let scale = T::from_usize(50).recip();
+    let sample_positions: Vec<(T, T)> = (0..100)
+        .into_iter()
+        .rev()
+        .map(|i| {
+            (
+                T::exp(-T::from_usize(i) / T::from_usize(20)),
+                T::from_usize(i) * scale,
+            )
+        })
+        .collect();
+
+    saturated_zero_error_fit::<T, _>(
+        kp1_arr![
+            T::from_usize(1),
+            T::from_usize(2).recip(),
+            T::from_usize(3).recip(),
+            T::from_usize(4).recip()
+        ],
+        &sample_positions,
+    )
+}
+test_all_types!(test_saturated_zero_error_fit_d3_1);
 
 fn test_saturated_zero_error_shift_fit_d2_1<T: TestableSimd>() {
     let scale = T::from_usize(1).recip();
@@ -418,6 +450,27 @@ fn test_saturated_zero_error_shift_fit_d2_1<T: TestableSimd>() {
     )
 }
 test_all_types!(test_saturated_zero_error_shift_fit_d2_1);
+
+fn test_saturated_zero_error_shift_fit_d3_1<T: TestableSimd>() {
+    let scale = T::from_usize(50).recip();
+    let sample_positions: Vec<(T, T)> = (0..100)
+        .into_iter()
+        .rev()
+        .map(|i| (T::from_usize(1), T::from_usize(i) * scale))
+        .collect();
+
+    saturated_zero_error_shift_fit::<T, _>(
+        kp1_arr![
+            T::from_usize(1),
+            T::from_usize(2).recip(),
+            T::from_usize(3).recip(),
+            T::from_usize(4).recip()
+        ],
+        &sample_positions,
+        T::from_usize(4),
+    )
+}
+test_all_types!(test_saturated_zero_error_shift_fit_d3_1);
 
 fn test_bias_only_d0_1<T: TestableSimd>() {
     bias_fit(kp1_arr![(T::from_usize(1), [T::from_usize(2)])]);
