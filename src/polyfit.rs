@@ -103,10 +103,6 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
     /// to the fit before the shift (`P'(x')`) as follows:
     ///
     ///  `P(x) = P'(x - delta_x)`
-    ///
-    /// # Usage Notes
-    ///
-    ///
     pub fn shift(&mut self, delta_x: T) {
         let mut old_sums = TwoKP1Array::<T, K>::zeroed();
         let mut coeffs = TwoKP1Array::<T, K>::zeroed();
@@ -148,7 +144,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
 
     /// Adds the weighted sample $w_{l, i} \[y_{l, i} - f^{(l)}(0)\]^2$ for all `y` dimensions.
     ///
-    /// # Notes
+    /// # Usage Notes
     ///
     /// `w` must be non-negative.
     pub fn update_at_zero(&mut self, l: usize, w: T, ys: [T; D]) {
@@ -178,7 +174,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
 
     /// Adds the weighted sample $w_{l, i} \[y_{l, i} - f^{(l)}(x_{l, i})\]^2$ for all `y` dimensions.
     ///
-    /// # Notes
+    /// # Usage Notes
     ///
     /// `w` must be non-negative.
     pub fn update(&mut self, l: usize, w: T, x: T, ys: [T; D]) {
