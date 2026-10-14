@@ -11,6 +11,7 @@ pastey = "0.2.3"
 wide = "1.7.1"
 cfg-if = "1.0.5"
 bytemuck = {version= "1.25.2", features=["min_const_generics", "const_zeroed"]}
+nalgebra = "0.35.0"
 
 [dev-dependencies]
 approx = "0.5.1"

@@ -484,3 +484,35 @@ fn test_bias_only_d2_1<T: TestableSimd>() {
     ]);
 }
 test_all_types!(test_bias_only_d2_1);
+
+#[test]
+fn acc_test_1() {
+    let scale = 1.0 / 5.0;
+    let samples: Vec<(f32, f32)> = (0..100)
+        .into_iter()
+        .rev()
+        .map(|i| (f32::exp(-(i as f32) / 20.0), (i as f32) * scale))
+        .collect();
+
+    let polynomial = kp1_arr![1.0, -0.1, 3.0, -4.0, -0.003];
+
+    let mut r = RegressionState::<f32, 4>::new();
+
+    let eval = |x: f32| {
+        let mut y = 0.0;
+        for c in polynomial.iter().copied().rev() {
+            y = y.mul_add(x, c);
+        }
+        y
+    };
+
+    for (w, x) in samples {
+        r.update(0, w, x, [eval(x)]);
+    }
+
+    let [fit] = r.compute_fit();
+    let [fit_qr] = r.compute_fit_qr();
+
+    println!("f : {:?}", &*fit.fit.max_deg());
+    println!("qf: {:?}", &*fit_qr.fit.max_deg());
+}

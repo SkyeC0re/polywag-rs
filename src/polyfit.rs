@@ -1,3 +1,4 @@
+use crate::simd::SimdField;
 use crate::storage::{Fit, FitErrors, FitResult};
 use crate::{
     simd::SimdAble,
@@ -7,6 +8,7 @@ use bytemuck::{Zeroable, zeroed};
 use core::cmp::max;
 use core::mem::MaybeUninit;
 use core::ptr;
+use nalgebra::{ComplexField, QR};
 
 unsafe fn shift_power_sums<T: SimdAble>(
     power_sums: &mut [T],
@@ -481,5 +483,84 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
     #[inline]
     pub fn compute_fit_with_bias(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
         self.compute_fit_inner(bias)
+    }
+}
+
+impl<T: SimdAble + ComplexField, const K: usize, const D: usize> RegressionState<T, K, D> {
+    pub fn compute_fit_qr(&self) -> [FitResult<T, K>; D] {
+        let mut fit_res = self.yys.map(|yys| {
+            let mut errors = FitErrors::zeroed();
+            unsafe { *errors.errors_mut().get_unchecked_mut(0) = yys }
+            FitResult::<T, K> {
+                fit: Fit::zeroed(),
+                errors,
+            }
+        });
+
+        if D == 0 {
+            // Why are you the way that you are.
+            return fit_res;
+        }
+
+        unsafe {
+            let gamma_0 = *self.xlks.get_l_xk(0, 0);
+            let mut a_mat = nalgebra::OMatrix::<T, _, _>::zeros_generic(
+                nalgebra::Dyn(K + 1),
+                nalgebra::Dyn(K + 1),
+            );
+            // <x^k, x^{k_prime}>
+            let mut inner_products =
+                MaybeUninit::<KP1Array<KP1Array<T, K>, K>>::zeroed().assume_init();
+            {
+                *inner_products.get_unchecked_mut(0).get_unchecked_mut(0) = gamma_0;
+                *a_mat.get_unchecked_mut((0, 0)) = gamma_0;
+                for k in 1..(K + 1) {
+                    for k_prime in 0..=k {
+                        let kk_prime = k + k_prime;
+
+                        let mut left = <T as SimdAble>::from_usize(k);
+                        let mut right = <T as SimdAble>::from_usize(k_prime);
+                        let mut mul = T::SF_ONE;
+                        let mut xkxk_prime = *self.xlks.get_l_xk(0, kk_prime);
+                        for l in 1..(k_prime.min(self.max_l_insertion) + 1) {
+                            mul *= left * right;
+                            left -= T::SF_ONE;
+                            right -= T::SF_ONE;
+
+                            xkxk_prime = <T as SimdField>::mul_add(
+                                *self.xlks.get_l_xk(l, kk_prime - l - l),
+                                mul,
+                                xkxk_prime,
+                            );
+                        }
+
+                        *inner_products
+                            .get_unchecked_mut(k)
+                            .get_unchecked_mut(k_prime) = xkxk_prime;
+                        *inner_products
+                            .get_unchecked_mut(k_prime)
+                            .get_unchecked_mut(k) = xkxk_prime;
+
+                        *a_mat.get_unchecked_mut((k, k_prime)) = xkxk_prime;
+                        *a_mat.get_unchecked_mut((k_prime, k)) = xkxk_prime;
+                    }
+                }
+            }
+
+            let qr = QR::new(a_mat);
+            let mut yxks = self.yxks.clone();
+
+            for (d, yxks) in yxks.into_iter().enumerate() {
+                let b = nalgebra::OVector::<T, nalgebra::Dyn>::from_column_slice(&*yxks);
+
+                let x = qr.solve(&b).unwrap();
+
+                let fit = fit_res[d].fit.get_pk_mut(K);
+                for i in 0..(K + 1) {
+                    fit[i] = x[i];
+                }
+            }
+        }
+        fit_res
     }
 }
