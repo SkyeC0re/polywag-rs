@@ -1,4 +1,4 @@
-use crate::storage::{Fit, FitErrors, FitResult};
+use crate::storage::{Fit, FitErrors, FitPolynomials};
 use crate::{
     simd::SimdAble,
     storage::{KP1Array, TwoKP1Array, XlkSums},
@@ -220,12 +220,12 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
         self.yys
     }
 
-    fn compute_fit_inner(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
+    fn compute_fit_inner(&self, bias: KP1Array<(T, [T; D]), K>) -> [Fit<T, K>; D] {
         let mut fit_res = self.yys.map(|yys| {
             let mut errors = FitErrors::zeroed();
             unsafe { *errors.errors_mut().get_unchecked_mut(0) = yys }
-            FitResult::<T, K> {
-                fit: Fit::zeroed(),
+            Fit::<T, K> {
+                polynomials: FitPolynomials::zeroed(),
                 errors,
             }
         });
@@ -304,13 +304,13 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
                 let err = fit_res_dim.errors.errors_mut().get_unchecked_mut(0);
                 *err = d_0.mul_add(-gamma_d_0, *err);
 
-                *fit_res_dim.fit.get_pk_i_mut(0, 0) = d_0;
+                *fit_res_dim.polynomials.get_pk_i_mut(0, 0) = d_0;
             }
 
             {
                 // MGS Procedure for larger k's. We abuse the storage of the zeroeth-dimension's
                 // polynomials to accomplish this.
-                let upper_coeffs = &mut fit_res.get_unchecked_mut(0).fit;
+                let upper_coeffs = &mut fit_res.get_unchecked_mut(0).polynomials;
                 let inner_products = inner_products.get_unchecked(0);
                 for k_larger in 1..(K + 1) {
                     let xkp0 = *inner_products.get_unchecked(k_larger);
@@ -326,7 +326,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
             let mut bias_factor = T::SF_ONE;
             for k in 1..=K {
                 ptr::copy_nonoverlapping(
-                    fit_res.get_unchecked(0).fit.get_pk(k).as_ptr(),
+                    fit_res.get_unchecked(0).polynomials.get_pk(k).as_ptr(),
                     p_k.as_mut_ptr(),
                     k,
                 );
@@ -359,8 +359,8 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
                 for dim in (0..D).rev() {
                     let yxks_dim = yxks.get_unchecked_mut(dim);
                     let fit_res_dim = fit_res.get_unchecked_mut(dim);
-                    fit_res_dim.fit.transfer_km1_k(k);
-                    let fit_pk = fit_res_dim.fit.get_pk_mut(k);
+                    fit_res_dim.polynomials.transfer_km1_k(k);
+                    let fit_pk = fit_res_dim.polynomials.get_pk_mut(k);
 
                     let yxk_dim = yxks_dim.get_unchecked_mut(k);
                     *yxk_dim = w_b.mul_add(bias_factor * *bias_k.1.get_unchecked(dim), *yxk_dim);
@@ -396,7 +396,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
                 {
                     // MGS Procedure for larger k's. We abuse the storage of the zeroeth-dimension's
                     // polynomials to accomplish this.
-                    let upper_coeffs = &mut fit_res.get_unchecked_mut(0).fit;
+                    let upper_coeffs = &mut fit_res.get_unchecked_mut(0).polynomials;
                     for k_upper in (k + 1)..(K + 1) {
                         let pk_upper = upper_coeffs.get_pk_mut(k_upper);
                         let mut c = *xkpk.get_unchecked(k_upper);
@@ -447,7 +447,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
     /// let [fit] = r.compute_fit();
     /// ```
     #[inline]
-    pub fn compute_fit(&self) -> [FitResult<T, K>; D] {
+    pub fn compute_fit(&self) -> [Fit<T, K>; D] {
         self.compute_fit_inner(zeroed())
     }
 
@@ -479,7 +479,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
     /// ```
     ///
     #[inline]
-    pub fn compute_fit_with_bias(&self, bias: KP1Array<(T, [T; D]), K>) -> [FitResult<T, K>; D] {
+    pub fn compute_fit_with_bias(&self, bias: KP1Array<(T, [T; D]), K>) -> [Fit<T, K>; D] {
         self.compute_fit_inner(bias)
     }
 }

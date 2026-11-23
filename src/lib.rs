@@ -11,7 +11,7 @@ use core::{
 mod polyfit;
 mod storage;
 pub use polyfit::*;
-pub use storage::{Fit, KP1Array};
+pub use storage::{FitPolynomials, KP1Array};
 
 pub mod simd;
 

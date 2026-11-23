@@ -178,13 +178,13 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct Fit<T: SimdAble, const K: usize> {
+pub struct FitPolynomials<T: SimdAble, const K: usize> {
     _coeffs: T,
     _coeffs1: [[T; K]; 2],
     _coeffs2: [[T; K]; K],
 }
 
-impl<T: SimdAble, const K: usize> Fit<T, K> {
+impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
 
     #[inline]
@@ -224,6 +224,8 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
         unsafe { slice::from_raw_parts_mut((&mut self._coeffs) as *mut T, Self::LEN) }
     }
 
+    /// Returns the regression polynomial of the specified degree. For values greater than `K`, this
+    /// returns the `K`-th degree regression polynomial.
     #[inline]
     pub fn deg(&self, degree: usize) -> SPolynomial<T, K> {
         let mut poly = SPolynomial::new();
@@ -235,6 +237,7 @@ impl<T: SimdAble, const K: usize> Fit<T, K> {
         poly
     }
 
+    /// Returns the regression polynomial of the degree `K`.
     #[inline(always)]
     pub fn max_deg(&self) -> SPolynomial<T, K> {
         self.deg(K)
@@ -261,8 +264,10 @@ impl<T: SimdAble, const K: usize> FitErrors<T, K> {
     }
 }
 
-pub struct FitResult<T: SimdAble, const K: usize> {
-    pub fit: Fit<T, K>,
+pub struct Fit<T: SimdAble, const K: usize> {
+    /// The regression polynomials up to degree `K`.
+    pub polynomials: FitPolynomials<T, K>,
+    /// The least squares error of the regression polynomials up to degree `K`.
     pub errors: FitErrors<T, K>,
 }
 
