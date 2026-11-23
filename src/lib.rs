@@ -1,3 +1,85 @@
+//! A `no-std` library for online, positively weighted polynomial regression.
+//!
+//! # Basic Usage
+//!
+//! ```rust
+//! extern crate polywag;
+//! use polywag::{RegressionState, kp1_arr};
+//!
+//! pub fn main() {
+//!     // Create a new regression state with a maximum regression polynomial degree 2 and without any samples.
+//!     let mut r = RegressionState::<f32, 2>::new();
+//!
+//!     // Add some zeroeth-degree (`x, y`) samples.
+//!     r.update(0, 1.0, 0.0, [2.0]);
+//!     r.update(0, 1.0, 1.0, [3.0]);
+//!     r.update(0, 1.0, 2.0, [4.0]);
+//!
+//!     // Compute the regression based on the current sample weights.
+//!     let [fit] = r.compute_fit();
+//!
+//!     // This should produce the following approximate polynomial regressions up to degree 2:
+//!
+//!     // [ 3.0, 0.0, 0.0 ]
+//!     fit.polynomials.deg(0);
+//!
+//!     // [ 2.0, 1.0, 0.0 ]
+//!     fit.polynomials.deg(1);
+//!
+//!     // [ 2.0, 1.0, 0.0 ]
+//!     fit.polynomials.deg(2);
+//! }
+//! ```
+//!
+//! # Numerical Stability
+//!
+//! Care was taken to keep the algorithm as stable as possible whilst still allowing the algorithm to be online
+//! (online in the sense that samples are not stored individually and its performance characteristics are unaffected
+//! by the amount of samples currently added to the regression state). To accomplish this, the main technique used here
+//! is [Modified Gram Schmidt](https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process).
+//!
+//! # Bias
+//!
+//! We allow regressions to be generated using special bias samples, one for each derivative:
+//!
+//! ```rust
+//! extern crate polywag;
+//! use polywag::{RegressionState, kp1_arr};
+//!
+//! pub fn main() {
+//!     let mut r = RegressionState::<f32, 2>::new();
+//!
+//!     // Add some bad samples (zero weight or not enough unique `x` values).
+//!     r.update(0, 0.0, 1.0, [2.0]);
+//!     r.update(0, 0.0, 1.0, [3.0]);
+//!
+//!     // Compute the regression based on the bad weight plus a bias at `x=0` in each dimension with weight 1.
+//!     let [fit] = r.compute_fit_with_bias(kp1_arr![
+//!         (1.0, [1.0]),
+//!         (1.0, [2.0]),
+//!         (1.0, [3.0]),
+//!     ]);
+//!
+//!     // This should produce the following approximate polynomial regressions up to degree 2:
+//!
+//!     // [ 1.0, 0.0, 0.0 ]
+//!     fit.polynomials.deg(0);
+//!
+//!     // [ 1.0, 2.0, 0.0 ]
+//!     fit.polynomials.deg(1);
+//!
+//!     // [ 1.0, 2.0, 3.0 ]
+//!     fit.polynomials.deg(2);
+//! }
+//! ```
+//!
+//!
+//! The algorithm is written in such a way that if the bias samples by themselves do not yield
+//! a numerical regression with infinities or `NaN`s then neither will the full regression (the
+//! bias samples together with the regular samples) as a result of catastrophic cancellation.
+//!
+//!
+
 #![no_std]
 
 use crate::simd::{SimdAble, SimdField};

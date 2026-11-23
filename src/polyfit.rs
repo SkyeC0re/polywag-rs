@@ -440,7 +440,7 @@ impl<T: SimdAble, const K: usize, const D: usize> RegressionState<T, K, D> {
     /// r.update(0, 1.0, 1.0, [3.0]);
     /// r.update(0, 1.0, 2.0, [4.0]);
     ///
-    /// // Should produce the following polynomials regressions up to degree 2:
+    /// // Should produce the following polynomial regressions up to degree 2:
     /// // [ 3.0, 0.0, 0.0 ]
     /// // [ 2.0, 1.0, 0.0 ]
     /// // [ 2.0, 1.0, 0.0 ]
