@@ -7,7 +7,8 @@
 //! use polywag::{RegressionState, kp1_arr};
 //!
 //! pub fn main() {
-//!     // Create a new regression state with a maximum regression polynomial degree 2 and without any samples.
+//!     // Create a new regression state with a maximum regression polynomial degree 2
+//!     // and without any samples.
 //!     let mut r = RegressionState::<f32, 2>::new();
 //!
 //!     // Add some zeroeth-degree (`x, y`) samples.
@@ -104,10 +105,11 @@ use core::{
 mod polyfit;
 mod storage;
 pub use polyfit::*;
-pub use storage::{FitPolynomials, KP1Array};
+pub use storage::{Fit, FitErrors, FitPolynomials, KP1Array};
 
 pub mod simd;
 
+/// A borrowed slice of polynomial coefficients.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct SlicePol<'a, T: SimdAble>(pub &'a [T]);

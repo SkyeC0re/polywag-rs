@@ -177,6 +177,7 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
     }
 }
 
+/// A compact respresentation of all regression polynomials up to degree `K`.
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct FitPolynomials<T: SimdAble, const K: usize>(
@@ -278,6 +279,7 @@ impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
     }
 }
 
+/// The associated error for the accompanying regression polynomials up to degree `K`.
 #[repr(transparent)]
 pub struct FitErrors<T: SimdAble, const K: usize>(KP1Array<T, K>);
 
