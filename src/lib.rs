@@ -1,4 +1,15 @@
-//! A `no-std` library for online, positively weighted polynomial regression.
+//! A `no-std` library for online, positively weighted least squares polynomial regression. At a high
+//! level this library allows a user to fit the best (in a weighted least squares sense) polynomial
+//! associated with a set of `w`(weight), `x`, `y` samples. Specifically, given a set of weighted samples
+//! $(w_{l, i}, x_{l, i}, y_{l, i})$, where:
+//! - $y_{l, i}$ a sampled value of a the $l$-th derivative of a function at $y_{l, i}$.
+//! - $w_{l, i} > 0$ is the sample's associated weight.
+//!
+//! Then the obtained regression polynomial $P$ of degree $k$ minimizes the following sum:
+//!
+//! $$
+//! \sum_{l=0}^k \sum_{i=1}^{N_l} w_{l, i} \left[ y_{l, i} - P(x_{l, i})  \right]^2
+//! $$
 //!
 //! # Basic Usage
 //!
