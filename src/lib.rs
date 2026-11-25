@@ -172,8 +172,7 @@ impl<T: SimdAble, const K: usize> ArrayPol<T, K> {
         Self(zeroed())
     }
 
-    /// Evaluates the polynomial over an array of values, producing an array of the output values.
-    ///
+    /// Evaluates the polynomial over an array of `x` values, producing an array of the output `y` values.
     #[inline(always)]
     pub fn eval_array<const N: usize>(&self, xs: [T; N]) -> [T; N] {
         SlicePol(&self).eval_array(xs)
