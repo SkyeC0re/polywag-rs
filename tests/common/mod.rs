@@ -243,10 +243,16 @@ impl SimdField for F256 {
 // The implementation does in fact store zero as the zero bit pattern.
 unsafe impl Zeroable for F256 {}
 
+const HALF_SIZE: usize = 16;
+
+impl F256 {
+    const _HALF_VALIDATION: () = const { assert!((size_of::<F256>() >> 1) == HALF_SIZE) };
+}
+
 impl SimdAble for F256 {
     type SimdT = Self;
 
-    type Half = [u8; 16];
+    type Half = [u8; HALF_SIZE];
 
     #[inline(always)]
     fn is_finite(&self) -> bool {

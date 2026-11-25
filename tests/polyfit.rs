@@ -28,14 +28,14 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
     let [mut f256_poly] = f256_regressor
         .compute_fit()
         .each_ref()
-        .map(|r| r.polynomials.max_deg());
+        .map(|r| r.polynomials.max_array_p());
 
     let avg_err = scaling.into()
         * (0..=samples)
             .into_iter()
             .map(|x| {
                 let x = scaling * T::from_usize(x);
-                let [y_p] = f256_poly.evaluate_array([x.into()]);
+                let [y_p] = f256_poly.eval_array([x.into()]);
                 let err = y(x).into() - y_p;
                 w(x).into() * err * err
             })
@@ -52,7 +52,7 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
                     .into_iter()
                     .map(|x| {
                         let x = scaling * T::from_usize(x);
-                        let [y_p] = f256_poly.evaluate_array([x.into()]);
+                        let [y_p] = f256_poly.eval_array([x.into()]);
                         let err = y(x).into() - y_p;
                         w(x).into() * err * err
                     })
@@ -71,14 +71,14 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
     let [poly] = regressor
         .compute_fit()
         .each_ref()
-        .map(|r| r.polynomials.max_deg());
+        .map(|r| r.polynomials.max_array_p());
 
     let poly_err = scaling.into()
         * (0..=samples)
             .into_iter()
             .map(|x| {
                 let x = scaling * T::from_usize(x);
-                let y_p = poly.evaluate_array([x])[0].into();
+                let y_p = poly.eval_array([x])[0].into();
                 let err = y(x).into() - y_p;
                 w(x).into() * err * err
             })
@@ -118,7 +118,7 @@ fn online_multi_dem_increasing_deg_fit<T: TestableSimd>() {
     let poly = regressor
         .compute_fit()
         .each_ref()
-        .map(|r| r.polynomials.max_deg());
+        .map(|r| r.polynomials.max_array_p());
 
     let eps = test_eps();
     assert_eps_diff_eq(poly[0][0], T::SF_ONE, eps);
@@ -167,7 +167,7 @@ fn saturated_zero_error_fit<T: TestableSimd, const K: usize>(
     for (i, (c_expected, c_found)) in polynomial
         .iter()
         .copied()
-        .zip(fit.polynomials.max_deg().iter().copied())
+        .zip(fit.polynomials.max_array_p().iter().copied())
         .enumerate()
     {
         assert!(
@@ -175,14 +175,14 @@ fn saturated_zero_error_fit<T: TestableSimd, const K: usize>(
             "Coefficient {} diverged: P_exp: {:?} != P_fit: {:?}",
             i,
             polynomial,
-            &*fit.polynomials.max_deg()
+            &*fit.polynomials.max_array_p()
         )
     }
 
-    let p = fit.polynomials.max_deg();
+    let p = fit.polynomials.max_array_p();
     for &(_, x) in samples {
         let expected = eval(x);
-        let found = p.evaluate_array([x])[0];
+        let found = p.eval_array([x])[0];
         assert!(
             eps_diff_eq(found, expected, eps),
             "P({:?}) diverged: {:?} != {:?}",
@@ -238,7 +238,7 @@ fn saturated_zero_error_shift_fit<T: TestableSimd, const K: usize>(
     for (i, (c_expected, c_found)) in polynomial
         .iter()
         .copied()
-        .zip(fit.polynomials.deg(K).iter().copied())
+        .zip(fit.polynomials.max_array_p().iter().copied())
         .enumerate()
     {
         assert!(
@@ -246,14 +246,14 @@ fn saturated_zero_error_shift_fit<T: TestableSimd, const K: usize>(
             "Coefficient {} diverged: P_exp: {:?} != P_fit: {:?}",
             i,
             polynomial,
-            &*fit.polynomials.deg(K)
+            &*fit.polynomials.max_array_p()
         )
     }
 
-    let p = fit.polynomials.deg(K);
+    let p = fit.polynomials.max_array_p();
     for &(_, x) in monotonic_samples {
         let expected = eval(x);
-        let found = p.evaluate_array([x])[0];
+        let found = p.eval_array([x])[0];
         assert!(
             eps_diff_eq(found, expected, eps),
             "P({:?}) diverged: {:?} != {:?}",
@@ -270,7 +270,7 @@ fn bias_fit<T: TestableSimd, const K: usize, const D: usize>(bias: KP1Array<(T, 
     let fit = r.compute_fit_with_bias(bias.clone());
     let eps = test_eps::<T>();
     for (dim, fit_dim) in fit.into_iter().enumerate() {
-        let poly_found = fit_dim.polynomials.max_deg();
+        let poly_found = fit_dim.polynomials.max_array_p();
         let poly_bias = bias.clone().map(|b| b.1[dim]);
         for (i, (c_expected, c_found)) in poly_bias
             .iter()

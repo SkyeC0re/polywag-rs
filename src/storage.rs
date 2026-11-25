@@ -8,7 +8,8 @@ use core::slice;
 
 use bytemuck::Zeroable;
 
-use crate::SPolynomial;
+use crate::ArrayPol;
+use crate::SlicePol;
 use crate::simd::SimdAble;
 
 /// An array with `K + 1` entries.
@@ -178,14 +179,33 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub struct FitPolynomials<T: SimdAble, const K: usize> {
-    _coeffs: T,
-    _coeffs1: [[T; K]; 2],
-    _coeffs2: [[T; K]; K],
-}
+pub struct FitPolynomials<T: SimdAble, const K: usize>(
+    // ZST to force T's alignment.
+    [T; 0],
+    // Storage for (K + 1)(K + 2) / 2 elements of T.
+    T::Half,
+    T::Half,
+    [[T::Half; K]; 3],
+    [[T::Half; K]; K],
+);
 
 impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
-    const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
+    const LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
+
+    #[inline(always)]
+    const fn ptr(&self) -> *const T {
+        self.0.as_ptr()
+    }
+
+    #[inline(always)]
+    const fn ptr_mut(&mut self) -> *mut T {
+        self.0.as_mut_ptr()
+    }
+
+    #[inline(always)]
+    const fn p_start(k: usize) -> usize {
+        (k * (k + 1)) >> 1
+    }
 
     #[inline]
     pub(crate) const fn zeroed() -> Self {
@@ -194,53 +214,67 @@ impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk(&self, k: usize) -> &[T] {
-        unsafe { slice::from_raw_parts(((&self._coeffs) as *const T).add(k * k), k + 1) }
+        unsafe { slice::from_raw_parts(self.ptr().add(Self::p_start(k)), k + 1) }
     }
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk_i(&self, k: usize, i: usize) -> &T {
-        unsafe { &*((&self._coeffs) as *const T).add(k * k + i) }
+        unsafe { &*self.ptr().add(Self::p_start(k) + i) }
     }
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk_mut(&mut self, k: usize) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(((&mut self._coeffs) as *mut T).add(k * k), k + 1) }
+        unsafe { slice::from_raw_parts_mut(self.ptr_mut().add(Self::p_start(k)), k + 1) }
     }
 
     #[inline(always)]
     pub(crate) const unsafe fn get_pk_i_mut(&mut self, k: usize, i: usize) -> &mut T {
-        unsafe { &mut *((&mut self._coeffs) as *mut T).add(k * k + i) }
+        unsafe { &mut *self.ptr_mut().add(Self::p_start(k) + i) }
     }
 
     pub(crate) const unsafe fn transfer_km1_k(&mut self, k: usize) {
-        let start = (&mut self._coeffs) as *mut T;
+        let start = self.ptr_mut();
         unsafe {
-            ptr::copy_nonoverlapping(start.add((k - 1) * (k - 1)), start.add(k * k), k);
+            ptr::copy_nonoverlapping(
+                start.add(Self::p_start(k - 1)),
+                start.add(Self::p_start(k)),
+                k,
+            );
         }
     }
 
-    #[inline(always)]
-    pub(crate) const fn as_raw_slice_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut((&mut self._coeffs) as *mut T, Self::LEN) }
-    }
-
-    /// Returns the regression polynomial of the specified degree. For values greater than `K`, this
-    /// returns the `K`-th degree regression polynomial.
+    /// Returns the regression polynomial of the specified degree as a borrowed slice.
+    /// For values greater than `K`, this returns the `K`-th degree regression polynomial.
     #[inline]
-    pub fn deg(&self, degree: usize) -> SPolynomial<T, K> {
-        let mut poly = SPolynomial::new();
-        let k_max = degree.min(K);
+    pub fn slice_p<'a>(&'a self, degree: usize) -> SlicePol<'a, T> {
+        let k = degree.min(K);
 
-        unsafe {
-            ptr::copy_nonoverlapping(self.get_pk(k_max).as_ptr(), poly.as_mut_ptr(), k_max + 1);
-        }
-        poly
+        unsafe { SlicePol(self.get_pk(k)) }
     }
 
-    /// Returns the regression polynomial of the degree `K`.
+    /// Returns the regression polynomial of the degree `K` as a borrowed slice.
     #[inline(always)]
-    pub fn max_deg(&self) -> SPolynomial<T, K> {
-        self.deg(K)
+    pub fn max_slice_p<'a>(&'a self) -> SlicePol<'a, T> {
+        self.slice_p(K)
+    }
+
+    /// Returns the regression polynomial of the specified degree as an array. For values greater
+    /// than `K`, this returns the `K`-th degree regression polynomial padded with zeroes.
+    #[inline]
+    pub fn array_p<const KK: usize>(&self) -> ArrayPol<T, KK> {
+        let mut p = ArrayPol::new();
+
+        let k = KK.min(K);
+        unsafe {
+            ptr::copy_nonoverlapping(self.ptr().add(Self::p_start(k)), p.as_mut_ptr(), k + 1);
+        }
+        p
+    }
+
+    /// Returns the regression polynomial of the degree `K` as an array.
+    #[inline(always)]
+    pub fn max_array_p(&self) -> ArrayPol<T, K> {
+        self.array_p()
     }
 }
 
