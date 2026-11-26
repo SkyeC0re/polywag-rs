@@ -22,3 +22,6 @@ rand = "0.10.3"
 [[bench]]
 name = "bench_fit"
 harness = false
+
+[target.'cfg(kani_ra)'.dependencies]
+kani = { git = "https://github.com/model-checking/kani" }

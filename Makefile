@@ -3,3 +3,6 @@ docs-katex:
 
 test-silent:
 	RUSTFLAGS="-Awarnings" cargo test
+
+test-miri:
+	MIRIFLAGS="-Zmiri-no-extra-rounding-error" cargo +nightly miri test

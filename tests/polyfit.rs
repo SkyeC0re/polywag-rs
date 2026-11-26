@@ -1,6 +1,5 @@
 mod common;
 
-// use approx::{abs_diff_eq, assert_abs_diff_eq};
 use core::ops::Add;
 use pastey::paste;
 use polywag::{KP1Array, RegressionState, kp1_arr, simd::SimdField};
@@ -11,16 +10,23 @@ use crate::common::{F256, TestableSimd, assert_eps_diff_eq, eps_diff_eq, test_ep
 fn online_minimal_fit<T: TestableSimd, const K: usize>(
     w: fn(T) -> T,
     y: fn(T) -> T,
-    samples: usize,
+    sample_count: usize,
 ) {
     let mut regressor = RegressionState::<T, K>::new();
     let mut f256_regressor = RegressionState::<F256, K>::new();
-    let scaling = T::SF_ONE / T::from_usize(samples);
+    let scaling = T::SF_ONE / T::from_usize(sample_count);
 
-    for x in 0..=samples {
+    // We compile the samples once, in case the function is not deterministic (or when
+    // miri adds non-determinism to transient floating point functions).
+    let samples = Vec::from_iter((0..=sample_count).map(|x| {
         let x = scaling * T::from_usize(x);
         let w = w(x);
         let y = y(x);
+
+        (w, x, y)
+    }));
+
+    for &(w, x, y) in &samples {
         regressor.update(0, w, x, [y]);
         f256_regressor.update(0, w.into(), x.into(), [y.into()]);
     }
@@ -31,13 +37,12 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
         .map(|r| r.polynomials.max_array_p());
 
     let avg_err = scaling.into()
-        * (0..=samples)
-            .into_iter()
-            .map(|x| {
-                let x = scaling * T::from_usize(x);
+        * samples
+            .iter()
+            .map(|&(w, x, y)| {
                 let [y_p] = f256_poly.eval_array([x.into()]);
-                let err = y(x).into() - y_p;
-                w(x).into() * err * err
+                let err = y.into() - y_p;
+                w.into() * err * err
             })
             .reduce(F256::add)
             .unwrap_or(F256::SF_ZERO);
@@ -48,13 +53,12 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
             let p_bckp = f256_poly[i];
             f256_poly[i] += jitter;
             let jitter_avg_err = scaling.into()
-                * (0..=samples)
-                    .into_iter()
-                    .map(|x| {
-                        let x = scaling * T::from_usize(x);
+                * samples
+                    .iter()
+                    .map(|&(w, x, y)| {
                         let [y_p] = f256_poly.eval_array([x.into()]);
-                        let err = y(x).into() - y_p;
-                        w(x).into() * err * err
+                        let err = y.into() - y_p;
+                        w.into() * err * err
                     })
                     .reduce(F256::add)
                     .unwrap_or(F256::SF_ZERO);
@@ -74,13 +78,12 @@ fn online_minimal_fit<T: TestableSimd, const K: usize>(
         .map(|r| r.polynomials.max_array_p());
 
     let poly_err = scaling.into()
-        * (0..=samples)
-            .into_iter()
-            .map(|x| {
-                let x = scaling * T::from_usize(x);
+        * samples
+            .iter()
+            .map(|&(w, x, y)| {
                 let y_p = poly.eval_array([x])[0].into();
-                let err = y(x).into() - y_p;
-                w(x).into() * err * err
+                let err = y.into() - y_p;
+                w.into() * err * err
             })
             .reduce(F256::add)
             .unwrap_or(F256::SF_ZERO);

@@ -64,7 +64,7 @@ macro_rules! kp1_arr {
         )
     };
 }
-impl<T: Zeroable, const K: usize> Deref for KP1Array<T, K> {
+impl<T, const K: usize> Deref for KP1Array<T, K> {
     type Target = [T];
 
     #[inline(always)]
@@ -73,7 +73,7 @@ impl<T: Zeroable, const K: usize> Deref for KP1Array<T, K> {
     }
 }
 
-impl<T: Zeroable, const K: usize> DerefMut for KP1Array<T, K> {
+impl<T, const K: usize> DerefMut for KP1Array<T, K> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + 1) }
@@ -133,35 +133,45 @@ unsafe impl<T: SimdAble + Zeroable, const K: usize> Zeroable for XlkSums<T, K> {
 impl<T: SimdAble, const K: usize> XlkSums<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
 
+    /// Get a `const` pointer to the start of the struct with full struct provenance.
+    #[inline(always)]
+    const fn ptr(&self) -> *const T {
+        (self as *const Self).cast()
+    }
+
+    /// Get a `mut` pointer to the start of the struct with full struct provenance.
+    #[inline(always)]
+    const fn ptr_mut(&mut self) -> *mut T {
+        (self as *mut Self).cast()
+    }
+
     #[inline(always)]
     pub const unsafe fn get_l_xks(&self, l: usize) -> &[T] {
         let kml = K - l;
-        unsafe { slice::from_raw_parts(((&self.0) as *const T).add(kml * kml), (kml << 1) + 1) }
+        unsafe { slice::from_raw_parts(self.ptr().add(kml * kml), (kml << 1) + 1) }
     }
 
     #[inline(always)]
     pub const unsafe fn get_l_xk(&self, l: usize, k: usize) -> &T {
         let kml = K - l;
-        unsafe { &*((&self.0) as *const T).add(kml * kml + k) }
+        unsafe { &*self.ptr().add(kml * kml + k) }
     }
 
     #[inline(always)]
     pub const unsafe fn get_l_xks_mut(&mut self, l: usize) -> &mut [T] {
         let kml = K - l;
-        unsafe {
-            slice::from_raw_parts_mut(((&mut self.0) as *mut T).add(kml * kml), (kml << 1) + 1)
-        }
+        unsafe { slice::from_raw_parts_mut(self.ptr_mut().add(kml * kml), (kml << 1) + 1) }
     }
 
     #[inline(always)]
     pub const unsafe fn get_l_xk_mut(&mut self, l: usize, k: usize) -> &mut T {
         let kml = K - l;
-        unsafe { &mut *((&mut self.0) as *mut T).add(kml * kml + k) }
+        unsafe { &mut *self.ptr_mut().add(kml * kml + k) }
     }
 
     #[inline(always)]
     pub const fn as_raw_slice_mut(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut((&mut self.0) as *mut T, Self::LEN) }
+        unsafe { slice::from_raw_parts_mut(self.ptr_mut(), Self::LEN) }
     }
 }
 
@@ -181,36 +191,32 @@ impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct FitPolynomials<T: SimdAble, const K: usize>(
-    // ZST to force T's alignment.
-    [T; 0],
-    // Storage for (K + 1)(K + 2) / 2 elements of T.
-    T::Half,
-    T::Half,
+    // (K+1)(K+2)/2 elements of T.
+    T,
     [[T::Half; K]; 3],
     [[T::Half; K]; K],
 );
 
+unsafe impl<T: SimdAble, const K: usize> Zeroable for FitPolynomials<T, K> where T: Zeroable {}
+
 impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
     const LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
 
+    /// Get a `const` pointer to the start of the struct with full struct provenance.
     #[inline(always)]
     const fn ptr(&self) -> *const T {
-        self.0.as_ptr()
+        (self as *const Self).cast()
     }
 
+    /// Get a `mut` pointer to the start of the struct with full struct provenance.
     #[inline(always)]
     const fn ptr_mut(&mut self) -> *mut T {
-        self.0.as_mut_ptr()
+        (self as *mut Self).cast()
     }
 
     #[inline(always)]
     const fn p_start(k: usize) -> usize {
         (k * (k + 1)) >> 1
-    }
-
-    #[inline]
-    pub(crate) const fn zeroed() -> Self {
-        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 
     #[inline(always)]
@@ -307,7 +313,54 @@ pub struct Fit<T: SimdAble, const K: usize> {
     pub errors: FitErrors<T, K>,
 }
 
-#[cfg(test)]
-mod tests {
-    // TODO
+#[cfg(kani)]
+mod verification {
+    use bytemuck::zeroed;
+
+    use super::*;
+
+    fn test_storage_packing<T: SimdAble, const K: usize>() {
+        let p: FitPolynomials<T, K> = zeroed();
+        let p_0 = p.slice_p(0);
+        assert_eq!(p_0.len(), 1);
+        let mut last_range = p_0.as_ptr_range();
+
+        for k in 1..=K {
+            let slice = p.slice_p(k);
+            assert_eq!(slice.len(), k + 1);
+
+            let new_range = slice.as_ptr_range();
+            assert!(last_range.end == new_range.start);
+
+            last_range = new_range;
+        }
+
+        assert!(
+            unsafe { last_range.end.offset_from_unsigned(p.ptr()) }
+                == FitPolynomials::<f32, K>::LEN
+        );
+    }
+
+    #[kani::proof]
+    pub fn f32_fit_polynomials_storage() {
+        let p: FitPolynomials<f32, 100> = zeroed();
+        let p_0 = p.slice_p(0);
+        assert_eq!(p_0.len(), 1);
+        let mut last_range = p_0.as_ptr_range();
+
+        for k in 1..=100 {
+            let slice = p.slice_p(k);
+            assert_eq!(slice.len(), k + 1);
+
+            let new_range = slice.as_ptr_range();
+            assert!(last_range.end == new_range.start);
+
+            last_range = new_range;
+        }
+
+        assert!(
+            unsafe { last_range.end.offset_from_unsigned(p.ptr()) }
+                == FitPolynomials::<f32, 100>::LEN
+        );
+    }
 }

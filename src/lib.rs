@@ -76,7 +76,8 @@
 //!     r.update(0, 0.0, 1.0, [2.0]);
 //!     r.update(0, 0.0, 1.0, [3.0]);
 //!
-//!     // Compute the regression based on the bad weight plus a bias at `x=0` in each dimension with weight 1.
+//!     // Compute the regression based on the bad weight plus a bias at `x=0`
+//!     // in each dimension with weight 1.
 //!     let [fit] = r.compute_fit_with_bias(kp1_arr![
 //!         (1.0, [1.0]),
 //!         (1.0, [2.0]),
@@ -132,7 +133,10 @@ impl<'a, T: SimdAble> SlicePol<'a, T> {
         let mut xv = T::SimdT::SF_ZERO;
         unsafe {
             let mut arr = MaybeUninit::<[T; N]>::uninit();
-            let mut data_ptr: *mut T = arr.as_mut_ptr() as _;
+            let data_ptr: *mut T = arr.as_mut_ptr() as _;
+            // Don't increase the pointer directly so as not to jump over the provenance
+            // on the last iteration.
+            let mut offset: usize = 0;
             for chunk in xs.chunks(T::SimdT::SF_LANES.get()) {
                 ptr::copy_nonoverlapping(
                     chunk.as_ptr(),
@@ -141,8 +145,12 @@ impl<'a, T: SimdAble> SlicePol<'a, T> {
                 );
 
                 let eval = eval_slice_horner(&self.0, xv);
-                ptr::copy_nonoverlapping(eval.as_slice().as_ptr(), data_ptr, chunk.len());
-                data_ptr = data_ptr.offset(T::SimdT::SF_LANES.get() as _);
+                ptr::copy_nonoverlapping(
+                    eval.as_slice().as_ptr(),
+                    data_ptr.add(offset),
+                    chunk.len(),
+                );
+                offset += T::SimdT::SF_LANES.get();
             }
 
             arr.assume_init()
