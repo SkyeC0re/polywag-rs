@@ -20,3 +20,8 @@ args = ["test", "${@}"]
 toolchain = "nightly"
 command = "cargo"
 args = ["miri", "test", "${@}"]
+
+[tasks.docs-katex]
+env = { "RUSTDOCFLAGS" = "--html-in-header katex-header.html" }
+command = "cargo"
+args = ["doc", "--no-deps"]

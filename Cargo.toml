@@ -4,24 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [package.metadata.docs.rs]
-rustdoc-args = [ "--html-in-header", "katex-header.html" ]
+rustdoc-args = ["--html-in-header", "katex-header.html"]
 
 [dependencies]
 pastey = "0.2.3"
 wide = "1.7.1"
 cfg-if = "1.0.5"
-bytemuck = {version= "1.25.2", features=["min_const_generics", "const_zeroed"]}
+bytemuck = { version = "1.25.2", features = [
+    "min_const_generics",
+    "const_zeroed",
+] }
 
 [dev-dependencies]
 approx = "0.5.1"
-f256 = { version = "0.11.2", default-features = false }
-criterion = {version = "0.8.2", features = ["html_reports"]}
-rand = "0.10.3"
+f256 = { version = "0.11.3", default-features = false }
+criterion = { version = "0.8.2", features = ["html_reports"] }
+rand = "0.10.4"
 
 
 [[bench]]
 name = "bench_fit"
 harness = false
-
-[target.'cfg(kani_ra)'.dependencies]
-kani = { git = "https://github.com/model-checking/kani" }
