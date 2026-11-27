@@ -8,7 +8,7 @@
 //! Then the obtained regression polynomial $P$ of degree $k$ minimizes the following sum:
 //!
 //! $$
-//! \sum_{l=0}^k \sum_{i=1}^{N_l} w_{l, i} \left[ y_{l, i} - P(x_{l, i})  \right]^2
+//! \sum_{l=0}^k \sum_{i=1}^{N_l} w_{l, i} \left[ y_{l, i} - P^{(l)}(x_{l, i})  \right]^2
 //! $$
 //!
 //! # Basic Usage
@@ -103,6 +103,47 @@
 //! bias samples together with the regular samples) as a result of catastrophic cancellation. In practice,
 //! this simply means that if the bias samples produce reasonable results by themselves, then the
 //! full regression should produce reasonable results as well.
+//!
+//! # Rolling Regression
+//!
+//! As part of the online nature of the regression state, it is possible create an infinite response filter
+//! with exponential decay as follows:
+//!
+//! ```rust
+//! extern crate polywag;
+//! use polywag::{RegressionState, kp1_arr};
+//!
+//! pub fn main() {
+//!     let mut r = RegressionState::<f32, 2>::new();
+//!     // Bias the initial regressions ever so slightly towards the zero polynomial,
+//!     // until there are sufficient samples in the regression state to fit a second
+//!     // degree polynomial.
+//!     r.update(0, 1.0, 0.0, [0.0]);
+//!     r.update(1, 1.0, 0.0, [0.0]);
+//!     r.update(2, 1.0, 0.0, [0.0]);
+//!
+//!     for t in 1..100 {
+//!         let t = t as f32;
+//!         // Sample weights decay to 0.9 of their value every time unit.
+//!         r.scale(0.9);
+//!
+//!         r.update(0, 1.0, t, [f32::sin(t)]);
+//!         // The current filter response.
+//!         let [fit] = r.compute_fit();
+//!     }
+//! }
+//! ```
+//!
+//! The code above effectively produces the second degree polynomial $P$ which minimizes
+//! the least squares sum of the exponentially decaying sine samples and original bias:
+//!
+//! $$
+//! \sum_{l=0}^2 0.9^{T} \epsilon \left[ P^{(l)}(t) \right]^2 + \sum_{t=1} 0.9^{T-t} \left[ \sin(t) - P(t)  \right]^2
+//! $$
+//!
+//! where $T$ is the current time.
+//!
+//!
 
 #![no_std]
 

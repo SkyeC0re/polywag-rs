@@ -200,7 +200,7 @@ pub struct FitPolynomials<T: SimdAble, const K: usize>(
 unsafe impl<T: SimdAble, const K: usize> Zeroable for FitPolynomials<T, K> where T: Zeroable {}
 
 impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
-    const LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
+    const _LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
 
     /// Get a `const` pointer to the start of the struct with full struct provenance.
     #[inline(always)]
@@ -222,11 +222,6 @@ impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
     #[inline(always)]
     pub(crate) const unsafe fn get_pk(&self, k: usize) -> &[T] {
         unsafe { slice::from_raw_parts(self.ptr().add(Self::p_start(k)), k + 1) }
-    }
-
-    #[inline(always)]
-    pub(crate) const unsafe fn get_pk_i(&self, k: usize, i: usize) -> &T {
-        unsafe { &*self.ptr().add(Self::p_start(k) + i) }
     }
 
     #[inline(always)]
