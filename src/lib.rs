@@ -19,10 +19,11 @@
 //!
 //! pub fn main() {
 //!     // Create a new regression state with a maximum regression polynomial degree 2
-//!     // and without any samples.
+//!     // and without any samples. The regression always has a single x-dimension and
+//!     // by default a single y-dimension.
 //!     let mut r = RegressionState::<f32, 2>::new();
 //!
-//!     // Add some zeroeth-degree (`x, y`) samples.
+//!     // Add some zeroeth-degree (`w, x, [y]`) samples.
 //!     r.update(0, 1.0, 0.0, [2.0]);
 //!     r.update(0, 1.0, 1.0, [3.0]);
 //!     r.update(0, 1.0, 2.0, [4.0]);

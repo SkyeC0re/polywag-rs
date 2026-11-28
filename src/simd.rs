@@ -283,7 +283,9 @@ macro_rules! wide_simd_able_impl {
      ( $( $elm:ty : $simdt:ty : $half_len:expr),* ) => {
         $(
         impl Proof<$elm> {
-            const _HALF_VALIDATION: () = const { assert!((size_of::<$elm>() >> 1) == $half_len) };
+            const _HALF_VALIDATION: () = const {
+                assert!((size_of::<$elm>() >> 1) == $half_len);
+            };
         }
 
         impl SimdAble for $elm {

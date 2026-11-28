@@ -3,6 +3,9 @@ name = "polywag"
 version = "0.1.0"
 edition = "2024"
 
+[badges]
+maintenance = { status = "actively-developed" }
+
 [package.metadata.docs.rs]
 rustdoc-args = ["--html-in-header", "katex-header.html"]
 
