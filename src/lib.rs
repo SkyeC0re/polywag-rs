@@ -1,0 +1,261 @@
+//! A `no-std` library for online, positively weighted least squares polynomial regression. At a high
+//! level this library allows a user to fit the best (in a weighted least squares sense) polynomial
+//! associated with a set of `w`(weight), `x`, `y` samples. Specifically, given a set of weighted samples
+//! $(w_{l, i}, x_{l, i}, y_{l, i})$, where:
+//! - $y_{l, i}$ a sampled value of a the $l$-th derivative of a function at $x_{l, i}$.
+//! - $w_{l, i} > 0$ is the sample's associated weight.
+//!
+//! Then the obtained regression polynomial $P$ of degree $k$ minimizes the following sum:
+//!
+//! $$
+//! \sum_{l=0}^k \sum_{i=1}^{N_l} w_{l, i} \left[ y_{l, i} - P^{(l)}(x_{l, i})  \right]^2
+//! $$
+//!
+//! # Basic Usage
+//!
+//! ```rust
+//! extern crate polywag;
+//! use polywag::{RegressionState, kp1_arr};
+//!
+//! pub fn main() {
+//!     // Create a new regression state with a maximum regression polynomial degree 2
+//!     // and without any samples. The regression always has a single x-dimension and
+//!     // by default a single y-dimension.
+//!     let mut r = RegressionState::<f32, 2>::new();
+//!
+//!     // Add some zeroeth-degree (`w, x, [y]`) samples.
+//!     r.update(0, 1.0, 0.0, [2.0]);
+//!     r.update(0, 1.0, 1.0, [3.0]);
+//!     r.update(0, 1.0, 2.0, [4.0]);
+//!
+//!     // Compute the regression based on the current sample weights.
+//!     let [fit] = r.compute_fit();
+//!
+//!     // This should produce the following approximate polynomial regressions up to degree 2:
+//!
+//!     // [ 3.0 ]
+//!     fit.polynomials.array_p::<0>();
+//!     // &[3.0]
+//!     fit.polynomials.slice_p(0);
+//!     
+//!     // [ 2.0, 1.0 ]
+//!     fit.polynomials.array_p::<1>();
+//!     // &[ 2.0, 1.0]
+//!     fit.polynomials.slice_p(1);
+//!
+//!     // [ 2.0, 1.0, 0.0 ]
+//!     fit.polynomials.array_p::<2>();
+//!     // &[ 2.0, 1.0, 0.0 ]
+//!     fit.polynomials.slice_p(2);
+//!
+//!     // [ 2.0, 1.0, 0.0, 0.0 ]
+//!     fit.polynomials.array_p::<3>();
+//!     // &[ 2.0, 1.0, 0.0 ]
+//!     fit.polynomials.slice_p(3);
+//! }
+//! ```
+//!
+//! # Numerical Stability
+//!
+//! Care was taken to keep the algorithm as stable as possible whilst still allowing the algorithm to be online
+//! (online in the sense that samples are not stored individually and its performance characteristics are unaffected
+//! by the amount of samples currently added to the regression state). To accomplish this, the main technique used here
+//! is [Modified Gram Schmidt](https://en.wikipedia.org/wiki/Gram%E2%80%93Schmidt_process).
+//!
+//! # Bias
+//!
+//! We allow regressions to be generated using special bias samples, one for each derivative:
+//!
+//! ```rust
+//! extern crate polywag;
+//! use polywag::{RegressionState, kp1_arr};
+//!
+//! pub fn main() {
+//!     let mut r = RegressionState::<f32, 2>::new();
+//!
+//!     // Add some bad samples (zero weight or not enough unique `x` values).
+//!     r.update(0, 0.0, 1.0, [2.0]);
+//!     r.update(0, 0.0, 1.0, [3.0]);
+//!
+//!     // Compute the regression based on the bad weight plus a bias at `x=0`
+//!     // in each dimension with weight 1.
+//!     let [fit] = r.compute_fit_with_bias(kp1_arr![
+//!         (1.0, [1.0]),
+//!         (1.0, [2.0]),
+//!         (1.0, [3.0]),
+//!     ]);
+//!
+//!     // This should produce the following approximate polynomial regressions up to degree 2:
+//!
+//!     // &[ 1.0 ]
+//!     fit.polynomials.slice_p(0);
+//!
+//!     // &[ 1.0, 2.0 ]
+//!     fit.polynomials.slice_p(1);
+//!
+//!     // &[ 1.0, 2.0, 3.0 ]
+//!     fit.polynomials.slice_p(2);
+//! }
+//! ```
+//!
+//!
+//! The algorithm is written in such a way that if the bias samples by themselves do not yield
+//! a numerical regression with infinities or `NaN`s then neither will the full regression (the
+//! bias samples together with the regular samples) as a result of catastrophic cancellation. In practice,
+//! this simply means that if the bias samples produce reasonable results by themselves, then the
+//! full regression should produce reasonable results as well.
+//!
+//! # Rolling Regression
+//!
+//! As part of the online nature of the regression state, it is possible create an infinite response filter
+//! with exponential decay as follows:
+//!
+//! ```rust
+//! extern crate polywag;
+//! use polywag::{RegressionState, kp1_arr};
+//!
+//! pub fn main() {
+//!     let mut r = RegressionState::<f32, 2>::new();
+//!     // Bias the initial regressions ever so slightly towards the zero polynomial,
+//!     // until there are sufficient samples in the regression state to fit a second
+//!     // degree polynomial.
+//!     r.update(0, 1.0, 0.0, [0.0]);
+//!     r.update(1, 1.0, 0.0, [0.0]);
+//!     r.update(2, 1.0, 0.0, [0.0]);
+//!
+//!     for t in 1..100 {
+//!         let t = t as f32;
+//!         // Sample weights decay to 0.9 of their value every time unit.
+//!         r.scale(0.9);
+//!
+//!         r.update(0, 1.0, t, [f32::sin(t)]);
+//!         // The current filter response.
+//!         let [fit] = r.compute_fit();
+//!     }
+//! }
+//! ```
+//!
+//! The code above effectively produces the second degree polynomial $P$ which minimizes
+//! the least squares sum of the exponentially decaying sine samples and original bias:
+//!
+//! $$
+//! \sum_{l=0}^2 0.9^{T} \epsilon \left[ P^{(l)}(t) \right]^2 + \sum_{t=1} 0.9^{T-t} \left[ \sin(t) - P(t)  \right]^2
+//! $$
+//!
+//! where $T$ is the current time.
+//!
+//!
+
+#![no_std]
+
+use crate::simd::{SimdAble, SimdField};
+use bytemuck::{Zeroable, zeroed};
+use core::{
+    mem::MaybeUninit,
+    ops::{Deref, DerefMut},
+    ptr,
+};
+
+mod polyfit;
+mod storage;
+pub use polyfit::*;
+pub use storage::{Fit, FitErrors, FitPolynomials, KP1Array};
+
+pub mod simd;
+
+/// A borrowed slice of polynomial coefficients.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct SlicePol<'a, T: SimdAble>(pub &'a [T]);
+
+impl<'a, T: SimdAble> SlicePol<'a, T> {
+    /// Evaluates the polynomial over an array of `x` values, producing an array of the output `y` values.
+    #[inline]
+    pub fn eval_array<const N: usize>(self, xs: [T; N]) -> [T; N] {
+        let mut xv = T::SimdT::SF_ZERO;
+        unsafe {
+            let mut arr = MaybeUninit::<[T; N]>::uninit();
+            let data_ptr: *mut T = arr.as_mut_ptr() as _;
+            // Don't increase the pointer directly so as not to jump over the provenance
+            // on the last iteration.
+            let mut offset: usize = 0;
+            for chunk in xs.chunks(T::SimdT::SF_LANES.get()) {
+                ptr::copy_nonoverlapping(
+                    chunk.as_ptr(),
+                    xv.as_mut_slice().as_mut_ptr() as _,
+                    chunk.len(),
+                );
+
+                let eval = eval_slice_horner(&self.0, xv);
+                ptr::copy_nonoverlapping(
+                    eval.as_slice().as_ptr(),
+                    data_ptr.add(offset),
+                    chunk.len(),
+                );
+                offset += T::SimdT::SF_LANES.get();
+            }
+
+            arr.assume_init()
+        }
+    }
+}
+
+impl<'a, T: SimdAble> Deref for SlicePol<'a, T> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+/// A stack allocated polynomial of degree `K`.
+#[repr(transparent)]
+pub struct ArrayPol<T: SimdAble, const K: usize>(pub KP1Array<T, K>);
+
+unsafe impl<T: SimdAble, const K: usize> Zeroable for ArrayPol<T, K> where T: Zeroable {}
+
+impl<T: SimdAble, const K: usize> ArrayPol<T, K> {
+    /// Create a new zero polynomial.
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self(zeroed())
+    }
+
+    /// Evaluates the polynomial over an array of `x` values, producing an array of the output `y` values.
+    #[inline(always)]
+    pub fn eval_array<const N: usize>(&self, xs: [T; N]) -> [T; N] {
+        SlicePol(&self).eval_array(xs)
+    }
+}
+
+impl<T: SimdAble, const K: usize> Deref for ArrayPol<T, K> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: SimdAble, const K: usize> DerefMut for ArrayPol<T, K> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[inline]
+fn eval_slice_horner<SF: SimdField>(slice: &[SF::Element], x: SF) -> SF {
+    let mut iter = slice.into_iter().rev().copied();
+    let mut result = if let Some(end_coeff) = iter.next() {
+        SF::splat(end_coeff)
+    } else {
+        return SF::SF_ZERO;
+    };
+    for ci in iter {
+        result = SF::mul_add(result, x, SF::splat(ci));
+    }
+
+    result
+}

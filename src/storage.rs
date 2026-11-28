@@ -1,0 +1,309 @@
+extern crate alloc;
+use core::fmt::Debug;
+use core::mem::MaybeUninit;
+use core::ops::Deref;
+use core::ops::DerefMut;
+use core::ptr;
+use core::slice;
+
+use bytemuck::Zeroable;
+
+use crate::ArrayPol;
+use crate::SlicePol;
+use crate::simd::SimdAble;
+
+/// An array with `K + 1` entries.
+#[derive(Clone)]
+#[repr(C)]
+pub struct KP1Array<T, const K: usize>(T, [T; K]);
+
+unsafe impl<T: Zeroable, const K: usize> Zeroable for KP1Array<T, K> {}
+
+impl<T: SimdAble, const K: usize> Debug for KP1Array<T, K> {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+
+impl<T, const K: usize> KP1Array<T, K> {
+    pub const LEN: usize = K + 1;
+
+    /// Create a new array by specific the required first element, along with the
+    /// tail `K` elements.
+    #[inline(always)]
+    pub const fn new(first: T, rest: [T; K]) -> Self {
+        Self(first, rest)
+    }
+
+    /// Create a new array by applying `f` over the values of the
+    /// old array.
+    #[inline]
+    pub fn map<O, F: FnMut(T) -> O>(self, mut f: F) -> KP1Array<O, K> {
+        KP1Array::new(f(self.0), self.1.map(f))
+    }
+}
+
+/// Create a [`struct@KP1Array`] with `K` inferred by usage.
+///
+/// # Examples
+///
+/// ```rust
+/// extern crate polywag;
+/// use polywag::kp1_arr;
+///
+/// // Create an array with K=3.
+/// let arr = kp1_arr![0.0, 1.0, 2.0, 3.0];
+/// ```
+#[macro_export]
+macro_rules! kp1_arr {
+    [$first:expr $(,$rest:expr)* $(,)?] => {
+        $crate::KP1Array::new(
+            $first,
+            [$($rest,)*]
+        )
+    };
+}
+impl<T, const K: usize> Deref for KP1Array<T, K> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe { slice::from_raw_parts((self as *const Self).cast::<T>(), K + 1) }
+    }
+}
+
+impl<T, const K: usize> DerefMut for KP1Array<T, K> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), K + 1) }
+    }
+}
+
+#[derive(Clone)]
+#[repr(C)]
+pub struct TwoKP1Array<T: SimdAble, const K: usize>(T, [T; K], [T; K]);
+
+impl<T: SimdAble, const K: usize> TwoKP1Array<T, K> {
+    pub const LEN: usize = K + K + 1;
+
+    #[inline(always)]
+    pub const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+}
+
+impl<T: SimdAble, const K: usize> Debug for TwoKP1Array<T, K> {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+
+impl<T: SimdAble, const K: usize> Deref for TwoKP1Array<T, K> {
+    type Target = [T];
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe { slice::from_raw_parts((self as *const Self).cast::<T>(), Self::LEN) }
+    }
+}
+
+impl<T: SimdAble, const K: usize> DerefMut for TwoKP1Array<T, K> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { slice::from_raw_parts_mut((self as *mut Self).cast::<T>(), Self::LEN) }
+    }
+}
+
+/// Stores all sums $\sum_{i=1}^{N_l} w_{l, i} x_{l, i}^k$ in the following form (l, k):
+/// <br>(K, 0)
+/// <br>(K - 1, 0), (K - 1, 1), (K - 1, 2)
+/// <br>                    .
+/// <br>                    .
+/// <br>                    .
+/// <br>(1, 0)    , (1, 1)    , (1, 2)    , ... , (1, 2K - 2)
+/// <br>(0, 0)    , (0, 1)    , (0, 2)    , ... , (0, 2K - 2), (0, 2K - 1), (0, 2K)
+#[derive(Clone)]
+#[repr(C)]
+pub(crate) struct XlkSums<T: SimdAble, const K: usize>(T, [[T; K]; 2], [[T; K]; K]);
+
+unsafe impl<T: SimdAble + Zeroable, const K: usize> Zeroable for XlkSums<T, K> {}
+
+impl<T: SimdAble, const K: usize> XlkSums<T, K> {
+    const LEN: usize = const { (K + 1).checked_mul(K + 1).unwrap() };
+
+    /// Get a `const` pointer to the start of the struct with full struct provenance.
+    #[inline(always)]
+    const fn ptr(&self) -> *const T {
+        (self as *const Self).cast()
+    }
+
+    /// Get a `mut` pointer to the start of the struct with full struct provenance.
+    #[inline(always)]
+    const fn ptr_mut(&mut self) -> *mut T {
+        (self as *mut Self).cast()
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_xks(&self, l: usize) -> &[T] {
+        let kml = K - l;
+        unsafe { slice::from_raw_parts(self.ptr().add(kml * kml), (kml << 1) + 1) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_xk(&self, l: usize, k: usize) -> &T {
+        let kml = K - l;
+        unsafe { &*self.ptr().add(kml * kml + k) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_xks_mut(&mut self, l: usize) -> &mut [T] {
+        let kml = K - l;
+        unsafe { slice::from_raw_parts_mut(self.ptr_mut().add(kml * kml), (kml << 1) + 1) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn get_l_xk_mut(&mut self, l: usize, k: usize) -> &mut T {
+        let kml = K - l;
+        unsafe { &mut *self.ptr_mut().add(kml * kml + k) }
+    }
+
+    #[inline(always)]
+    pub const fn as_raw_slice_mut(&mut self) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut(self.ptr_mut(), Self::LEN) }
+    }
+}
+
+impl<T: SimdAble, const K: usize> Debug for XlkSums<T, K> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut list = f.debug_list();
+
+        for l in 0..=K {
+            list.entry(&unsafe { self.get_l_xks(l) });
+        }
+
+        list.finish()
+    }
+}
+
+/// A compact respresentation of all regression polynomials up to degree `K`.
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct FitPolynomials<T: SimdAble, const K: usize>(
+    // (K+1)(K+2)/2 elements of T.
+    T,
+    [[T::Half; K]; 3],
+    [[T::Half; K]; K],
+);
+
+unsafe impl<T: SimdAble, const K: usize> Zeroable for FitPolynomials<T, K> where T: Zeroable {}
+
+impl<T: SimdAble, const K: usize> FitPolynomials<T, K> {
+    const _LEN: usize = const { (K + 1).checked_mul(K + 2).unwrap() >> 1 };
+
+    /// Get a `const` pointer to the start of the struct with full struct provenance.
+    #[inline(always)]
+    const fn ptr(&self) -> *const T {
+        (self as *const Self).cast()
+    }
+
+    /// Get a `mut` pointer to the start of the struct with full struct provenance.
+    #[inline(always)]
+    const fn ptr_mut(&mut self) -> *mut T {
+        (self as *mut Self).cast()
+    }
+
+    #[inline(always)]
+    const fn p_start(k: usize) -> usize {
+        (k * (k + 1)) >> 1
+    }
+
+    #[inline(always)]
+    pub(crate) const unsafe fn get_pk(&self, k: usize) -> &[T] {
+        unsafe { slice::from_raw_parts(self.ptr().add(Self::p_start(k)), k + 1) }
+    }
+
+    #[inline(always)]
+    pub(crate) const unsafe fn get_pk_mut(&mut self, k: usize) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut(self.ptr_mut().add(Self::p_start(k)), k + 1) }
+    }
+
+    #[inline(always)]
+    pub(crate) const unsafe fn get_pk_i_mut(&mut self, k: usize, i: usize) -> &mut T {
+        unsafe { &mut *self.ptr_mut().add(Self::p_start(k) + i) }
+    }
+
+    pub(crate) const unsafe fn transfer_km1_k(&mut self, k: usize) {
+        let start = self.ptr_mut();
+        unsafe {
+            ptr::copy_nonoverlapping(
+                start.add(Self::p_start(k - 1)),
+                start.add(Self::p_start(k)),
+                k,
+            );
+        }
+    }
+
+    /// Returns the regression polynomial of the specified degree as a borrowed slice.
+    /// For values greater than `K`, this returns the `K`-th degree regression polynomial.
+    #[inline]
+    pub fn slice_p<'a>(&'a self, degree: usize) -> SlicePol<'a, T> {
+        let k = degree.min(K);
+
+        unsafe { SlicePol(self.get_pk(k)) }
+    }
+
+    /// Returns the regression polynomial of the degree `K` as a borrowed slice.
+    #[inline(always)]
+    pub fn max_slice_p<'a>(&'a self) -> SlicePol<'a, T> {
+        self.slice_p(K)
+    }
+
+    /// Returns the regression polynomial of the specified degree as an array. For values greater
+    /// than `K`, this returns the `K`-th degree regression polynomial padded with zeroes.
+    #[inline]
+    pub fn array_p<const KK: usize>(&self) -> ArrayPol<T, KK> {
+        let mut p = ArrayPol::new();
+
+        let k = KK.min(K);
+        unsafe {
+            ptr::copy_nonoverlapping(self.ptr().add(Self::p_start(k)), p.as_mut_ptr(), k + 1);
+        }
+        p
+    }
+
+    /// Returns the regression polynomial of the degree `K` as an array.
+    #[inline(always)]
+    pub fn max_array_p(&self) -> ArrayPol<T, K> {
+        self.array_p()
+    }
+}
+
+/// The associated error for the accompanying regression polynomials up to degree `K`.
+#[repr(transparent)]
+pub struct FitErrors<T: SimdAble, const K: usize>(KP1Array<T, K>);
+
+impl<T: SimdAble, const K: usize> FitErrors<T, K> {
+    #[inline(always)]
+    pub(crate) const fn zeroed() -> Self {
+        unsafe { MaybeUninit::zeroed().assume_init() }
+    }
+
+    #[inline(always)]
+    pub fn error(&self, degree: usize) -> T {
+        unsafe { *self.0.get_unchecked(degree.min(K)) }
+    }
+
+    #[inline(always)]
+    pub(crate) const fn errors_mut(&mut self) -> &mut KP1Array<T, K> {
+        &mut self.0
+    }
+}
+
+pub struct Fit<T: SimdAble, const K: usize> {
+    /// The regression polynomials up to degree `K`.
+    pub polynomials: FitPolynomials<T, K>,
+    /// The least squares error of the regression polynomials up to degree `K`.
+    pub errors: FitErrors<T, K>,
+}
